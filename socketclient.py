@@ -1,15 +1,15 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile
+import json,os,time,zipfile,sys
 
-DEBUG=0
+DEBUG=1
 BUFSIZE=1024
 BAKSERV_IP = "127.0.0.1"
 PORT = 10001
 DATABASE_NAME='skynew'
-BAKCPATH='d:\\WLMP\\back_database\\'
-MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\'
+BACKPATH='d:\\WLMP\\back_database\\'
+MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
 #time format "%Y%m%d%H%M%S"
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 
@@ -25,12 +25,16 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 	mydata = open(filepath, "rb")
 	sendsize=0
 	Flag=True
+	debug_log('sending data...')
 	while Flag:
 		if file_size < sendsize+BUFSIZE:
 			debug_log('send remain data')
 			chunk = mydata.read(file_size - sendsize)
 			Flag = False
 		else:
+			#debug_log('sum is :%d\nsending %d\r' % (sendsize,file_size))
+			sys.stdout.write('sum is :%d  sending %d\r' % (sendsize,file_size))
+			sys.stdout.flush()
 			chunk = mydata.read(BUFSIZE)
 			sendsize+=BUFSIZE
 		tcpClient.sendall(chunk)
@@ -50,14 +54,13 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 	else:
 		return 0
 
-
 def Sendfile(fileinfo):
 	tcpClient = socket(AF_INET,SOCK_STREAM)
-	sock.settimeout(5)  
+	#tcpClient.settimeout(5)  
 	e=0  
-	try:  
-	    sock.connect((BAKSERV_IP,PORT))     
-	except sock.settimeout,e:  
+	try: 
+	    tcpClient.connect((BAKSERV_IP,PORT))     
+	except tcpClient.settimeout,e:  
 	    return 'connect timeout'  
 	except e:  
 	    return 'connect have a error'  
@@ -73,17 +76,14 @@ def Sendfile(fileinfo):
 	debug_log('send file info data')
 	tcpClient.sendall('%s' % data_tosend)
 
-	try:
-		ready = tcpClient.recv(BUFSIZE).strip()
-		debug_log('rc is |%s|' % ready)
-		if ready == 'comeon':
-			rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
-			tcpClient.close()
-		
-		return 1
-	except Exception,ex:
-		print Exception,":",ex
+	ready = tcpClient.recv(BUFSIZE).strip()
+	debug_log('rc is |%s|' % ready)
+	if ready == 'comeon':
+		rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
 		tcpClient.close()
+		return 1
+	else:
+		return 0
 
 def sqlbak():
 	if not os.path.exists(BACKPATH):
@@ -93,11 +93,13 @@ def sqlbak():
 	zip_file_name = '%s%s.zip' % (BACKPATH,TIMESTR)
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
-	sql_comm='%smysqlbak --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s%s.sql' % (MYSQLDUMP,DATABASE_NAME,backfile)
+	sql_comm='%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
+	debug_log('sql_comm is :%s'%sql_comm)
 	if os.system(sql_comm) == 0:
 		debug_log('NOTE: %s is backup successfully' % DATABASE_NAME)
 	else:
-		debug_log('ERROR: %s is backup Failed.' % DATABASE_NAME)
+		debug_log('ERROR: %s is backup Failed, sql_comm is exec failed.' % DATABASE_NAME)
+		os._exit(1)
 
 	if os.path.exists(backfile):
 		f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
@@ -106,13 +108,18 @@ def sqlbak():
 		return zip_file_name
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
-		os._exit()
+		os._exit(1)
 
 if __name__ == '__main__':
-	#fpath = 'd:\\skyclassSetup\\LiveInfoSetup.exe'
-	fpath = sqlbak()
-	fname = os.path.basename(fpath)
-	fsize = os.stat(fpath).st_size
-	fileinfo = {'filepath':fpath, 'filename':fname, 'filesize':fsize}
-	ret=Sendfile(fileinfo)
+	fpath = 'D:\\init_file\\mseinstall.exe'
+	#fpath = sqlbak()
+	debug_log('fpath is :%s'%fpath)
+	if fpath:
+		fname = os.path.basename(fpath)
+		fsize = os.stat(fpath).st_size
+		fileinfo = {'filepath':fpath, 'filename':fname, 'filesize':fsize}
+		if not Sendfile(fileinfo):
+			print 'the server not ready'
+	else :
+		os._exit(0)
 
