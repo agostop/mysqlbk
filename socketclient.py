@@ -1,15 +1,15 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile,binascii
+import json,os,time,zipfile,binascii,sys
 
 DEBUG=1
 BUFSIZE=1024
 BAKSERV_IP = "127.0.0.1"
 PORT = 10001
 DATABASE_NAME='skynew'
-BAKCPATH='d:\\WLMP\\back_database\\'
-MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\'
+BACKPATH='d:\\WLMP\\back_database\\'
+MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
 #time format "%Y%m%d%H%M%S"
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 
@@ -48,6 +48,8 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 			chunk = mydata.read(file_size - sendsize)
 			Flag = False
 		else:
+			sys.stdout.('filesize is : %d \t sending %d \r' % (file_size,sendsize))
+			sys.stdout.flush()
 			chunk = mydata.read(BUFSIZE)
 			sendsize+=BUFSIZE
 		tcpClient.sendall(chunk)
@@ -69,11 +71,10 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 
 def Sendfile(fileinfo):
 	tcpClient = socket(AF_INET,SOCK_STREAM)
-	sock.settimeout(5)  
 	e=0  
 	try:  
-	    sock.connect((BAKSERV_IP,PORT))     
-	except sock.settimeout,e:  
+	    tcpClient.connect((BAKSERV_IP,PORT))     
+	except tcpClient.settimeout,e:  
 	    return 'connect timeout'  
 	except e:  
 	    return 'connect have a error'  
@@ -109,11 +110,11 @@ def sqlbak():
 	zip_file_name = '%s%s.zip' % (BACKPATH,TIMESTR)
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
-	sql_comm='%smysqlbak --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s%s.sql' % (MYSQLDUMP,DATABASE_NAME,backfile)
+	sql_comm='%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s%s.sql' % (MYSQLDUMP,DATABASE_NAME,backfile)
 	if os.system(sql_comm) == 0:
 		debug_log('NOTE: %s is backup successfully' % DATABASE_NAME)
 	else:
-		debug_log('ERROR: %s is backup Failed.' % DATABASE_NAME)
+		debug_log('ERROR: %s is backup Failed, sql_comm is exec failed.' % DATABASE_NAME)
 
 	if os.path.exists(backfile):
 		f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
@@ -122,7 +123,7 @@ def sqlbak():
 		return zip_file_name
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
-		os._exit()
+		os._exit(1)
 
 if __name__ == '__main__':
 	fpath = 'd:\\skyclassSetup\\LiveInfoSetup.exe'
