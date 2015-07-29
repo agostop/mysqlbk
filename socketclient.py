@@ -1,7 +1,7 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile,binascii,sys
+import json,os,time,zipfile,binascii,sys,sched
 
 DEBUG=1
 BUFSIZE=1024
@@ -26,7 +26,7 @@ def file_crc32(filename):
 		str = f.read(blocksize)
 		crc = 0
 		while len(str) != 0:
-			crc = binascii.crc32(str,crc) & 0xffffffff
+			crc = binascii.crc32(str,crc) & 0xffffffff  #is to get unsigned int value . the crc my to like -132423  if not to this
 			str = f.read(blocksize)
 		f.close()
 
@@ -48,7 +48,7 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 			chunk = mydata.read(file_size - sendsize)
 			Flag = False
 		else:
-			sys.stdout.('filesize is : %d \t sending %d \r' % (file_size,sendsize))
+			sys.stdout.write('filesize is : %d \t sending %d \r' % (file_size,sendsize))
 			sys.stdout.flush()
 			chunk = mydata.read(BUFSIZE)
 			sendsize+=BUFSIZE
@@ -57,13 +57,10 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 	debug_log('data send over')
 	mydata.close()
 	
-	#debug_log('now to send EOF')
-	#tcpClient.sendall('EOF\n')
 	debug_log('wait server response')
 	recv=tcpClient.recv(BUFSIZE)
 	debug_log('recv the message : %s' % recv)
-	if recv:
-		print recv
+	if recv == 'success':
 		return 1
 	else:
 		return 0
@@ -73,7 +70,7 @@ def Sendfile(fileinfo):
 	tcpClient = socket(AF_INET,SOCK_STREAM)
 	e=0  
 	try:  
-	    tcpClient.connect((BAKSERV_IP,PORT))     
+	    tcpClient.connect((BAKSERV_IP,PORT))
 	except tcpClient.settimeout,e:  
 	    return 'connect timeout'  
 	except e:  
@@ -84,19 +81,28 @@ def Sendfile(fileinfo):
 	filepath = fileinfo['filepath']
 	filesize = fileinfo['filesize']
 	filename = fileinfo['filename']
-	fileinfo = {'filename':filename,'filesize':filesize}
+	filecrc32  = fileinfo['filecrc32']
+	ready_tosend_fileinfo = {'filename':filename,'filesize':filesize,'filecrc32':filecrc32}
 
-	data_tosend = json.dumps(fileinfo)
+	data_tosend = json.dumps(ready_tosend_fileinfo)
 	debug_log('send file info data')
 	tcpClient.sendall('%s' % data_tosend)
 
 	try:
-		ready = tcpClient.recv(BUFSIZE).strip()
-		debug_log('rc is |%s|' % ready)
-		if ready == 'comeon':
-			rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
-			tcpClient.close()
-		
+		while 1:
+			ready = tcpClient.recv(BUFSIZE).strip()
+			debug_log('rc is |%s|' % ready)
+			if ready == 'COME_ON':
+				rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
+				if rt:
+					print 'send finished'
+					break
+				else:
+					print 'send failed, retrans file...server response: %s' % rt
+					#tcpClient.sendall('resend')
+			else:
+				print "server reponse : %s" % ready
+				break
 		return 1
 	except Exception,ex:
 		print Exception,":",ex
@@ -124,13 +130,23 @@ def sqlbak():
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
 		os._exit(1)
+	
 
 if __name__ == '__main__':
-	fpath = 'd:\\skyclassSetup\\LiveInfoSetup.exe'
-	#fpath = sqlbak()
-	debug_log(file_crc32(fpath))
-#	fname = os.path.basename(fpath)
-#	fsize = os.stat(fpath).st_size
-#	fileinfo = {'filepath':fpath, 'filename':fname, 'filesize':fsize}
-#	ret=Sendfile(fileinfo)
+	while 1:
+		time.sleep(1) 
+		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
+		if cur_hour=='0100':
+		#	fpath = 'd:\\TMP_E\\VMware-player-6.0.2-1744117.exe'
+			fpath = sqlbak()
+			crc32val=file_crc32(fpath)
+			debug_log('the file crc32 value is : %s' % crc32val)
 
+			fname = os.path.basename(fpath)
+			fsize = os.stat(fpath).st_size
+			fileinfo = {'filepath':fpath, \
+									'filename':fname, \
+									'filesize':fsize, \
+									'filecrc32':crc32val}
+			ret=Sendfile(fileinfo)
+			time.sleep(60)
