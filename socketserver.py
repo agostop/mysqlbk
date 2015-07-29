@@ -92,8 +92,8 @@ class MyRequestHandler(BRH):
 				filecrc32 %s'\
 				% (filename,file_size,file_crc32))
 
-		tmp_path='d:\\TMP_E\\TMP\\'
-		fin_path='d:\\TMP_E\\sql_bak\\%s\\' % addr[0]
+		tmp_path='d:\\TMP\\'
+		fin_path='d:\\sql_bak\\%s\\' % addr[0]
 		tmp_file='%s%s' % (tmp_path,filename)
 
 		while 1:
@@ -101,7 +101,7 @@ class MyRequestHandler(BRH):
 			print 'recv over, next to check file crc32...'
 			tmp_crc=self.to_crc32(tmp_file)
 			self.debug_log('the tmp_crc is : %s' % tmp_crc)
-			if tmp_crc is file_crc32:
+			if tmp_crc == file_crc32:
 				self.request.send("success")
 				print 'recv success'
 				self.movefile(tmp_path,fin_path,filename)

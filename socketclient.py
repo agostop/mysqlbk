@@ -11,6 +11,7 @@ DATABASE_NAME='skynew'
 BACKPATH='d:\\WLMP\\back_database\\'
 MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
 #time format "%Y%m%d%H%M%S"
+REMFILE='%s%s' % (BACKPATH,'remember.file')
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 
 def debug_log(msg):
@@ -18,6 +19,35 @@ def debug_log(msg):
 		print msg
 	else:
 		pass
+
+def remember_success_file(filename):
+	basename=os.path.basename(filename)
+	try:
+		rfile=open(REMFILE,'a')
+		rfile.write(basename)
+	except:
+		print 'the file is open or write failed'
+	rfile.close()
+
+def check_fail_file():
+	if not os.path.exists(REMFILE):
+		return 0
+
+	f_list=[]
+	rfile=open(REMFILE,'r')
+	while 1:
+		line = rfile.readline()
+		if not line: break
+		f_list.append(line)
+
+	file_list=[]
+	for dir_path,subpaths,files in os.walk(BACKPATH):
+		for f in files:
+			if f not in f_list:
+				f_path=os.path.join(dir_path,f)
+				file_list.append(f_path)
+
+	return file_list
 
 def file_crc32(filename):
 	try:
@@ -65,7 +95,6 @@ def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
 	else:
 		return 0
 
-
 def Sendfile(fileinfo):
 	tcpClient = socket(AF_INET,SOCK_STREAM)
 	e=0  
@@ -96,6 +125,7 @@ def Sendfile(fileinfo):
 				rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
 				if rt:
 					print 'send finished'
+					remember_success_file(filepath)		
 					break
 				else:
 					print 'send failed, retrans file...server response: %s' % rt
@@ -131,14 +161,14 @@ def sqlbak():
 		debug_log('ERROR: cannot find the sql back file.')
 		os._exit(1)
 	
-
 if __name__ == '__main__':
 	while 1:
 		time.sleep(1) 
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
-		if cur_hour=='0100':
-		#	fpath = 'd:\\TMP_E\\VMware-player-6.0.2-1744117.exe'
-			fpath = sqlbak()
+		if cur_hour=='2108':
+
+			fpath = 'D:\\skyclassSetup\\TeacherSetup469.exe'
+		#	fpath = sqlbak()
 			crc32val=file_crc32(fpath)
 			debug_log('the file crc32 value is : %s' % crc32val)
 
