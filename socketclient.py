@@ -24,30 +24,31 @@ def remember_success_file(filename):
 	basename=os.path.basename(filename)
 	try:
 		rfile=open(REMFILE,'a')
-		rfile.write(basename)
+		rfile.write('%s\n' % basename)
 	except:
 		print 'the file is open or write failed'
 	rfile.close()
 
-def check_fail_file():
+def unsend_file():
 	if not os.path.exists(REMFILE):
 		return 0
 
 	f_list=[]
 	rfile=open(REMFILE,'r')
 	while 1:
-		line = rfile.readline()
+		line = rfile.readline().strip()
 		if not line: break
 		f_list.append(line)
 
-	file_list=[]
+	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
+			if f == 'remember.file' : continue
 			if f not in f_list:
 				f_path=os.path.join(dir_path,f)
-				file_list.append(f_path)
+				ned2send_file_path.append(f_path)
 
-	return file_list
+	return ned2send_file_path
 
 def file_crc32(filename):
 	try:
@@ -66,12 +67,12 @@ def file_crc32(filename):
 
 	return '%08x' % crc
 
-def sendfiledata(filepath,filesize,BUFSIZE,tcpClient):
-	file_size =filesize
+def sendfiledata(filepath,filesize,tcpClient):
+	file_size = filesize
 	debug_log('now open the file')
 	mydata = open(filepath, "rb")
-	sendsize=0
-	Flag=True
+	sendsize = 0
+	Flag = True
 	while Flag:
 		if file_size < sendsize+BUFSIZE:
 			debug_log('send remain data')
@@ -114,6 +115,7 @@ def Sendfile(fileinfo):
 	ready_tosend_fileinfo = {'filename':filename,'filesize':filesize,'filecrc32':filecrc32}
 
 	data_tosend = json.dumps(ready_tosend_fileinfo)
+	#data_tosend = json.dumps(fileinfo)
 	debug_log('send file info data')
 	tcpClient.sendall('%s' % data_tosend)
 
@@ -122,7 +124,7 @@ def Sendfile(fileinfo):
 			ready = tcpClient.recv(BUFSIZE).strip()
 			debug_log('rc is |%s|' % ready)
 			if ready == 'COME_ON':
-				rt=sendfiledata(filepath,filesize,BUFSIZE,tcpClient)
+				rt=sendfiledata(filepath,filesize,tcpClient)
 				if rt:
 					print 'send finished'
 					remember_success_file(filepath)		
@@ -165,18 +167,24 @@ if __name__ == '__main__':
 	while 1:
 		time.sleep(1) 
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
-		if cur_hour=='2108':
+		if cur_hour=='1838':
 
-			fpath = 'D:\\skyclassSetup\\TeacherSetup469.exe'
-		#	fpath = sqlbak()
-			crc32val=file_crc32(fpath)
-			debug_log('the file crc32 value is : %s' % crc32val)
+			nedsend=[]
+			new_sql_file = 'D:\\WLMP\\back_database\\20150727.zip'
+		#	new_sql_file = sqlbak()
+			nedsend=unsend_file()
+			nedsend.append(new_sql_file)
 
-			fname = os.path.basename(fpath)
-			fsize = os.stat(fpath).st_size
-			fileinfo = {'filepath':fpath, \
-									'filename':fname, \
-									'filesize':fsize, \
-									'filecrc32':crc32val}
-			ret=Sendfile(fileinfo)
+			for fpath in nedsend:
+				fileinfo={}
+				fname = os.path.basename(fpath)
+				fsize = os.stat(fpath).st_size
+				crc32val = file_crc32(fpath)
+				fileinfo['filename'] = fname
+				fileinfo['filepath'] = fpath
+				fileinfo['filesize'] = fsize
+				fileinfo['filecrc32'] = crc32val
+				ret=Sendfile(fileinfo)
+			
 			time.sleep(60)
+

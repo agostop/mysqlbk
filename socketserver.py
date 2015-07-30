@@ -46,7 +46,7 @@ class MyRequestHandler(BRH):
 		except IOError:
 			print 'file open failed'
 			self.request.send("FILE_OPEN_FAILED")
-			self.finish()
+			return 0
 
 		self.request.send("COME_ON")
 		recv_size=0
@@ -73,13 +73,15 @@ class MyRequestHandler(BRH):
 			if os.path.exists(tmp_file):
 				os.remove(tmpfile)
 			print "close socket , have a error."
-			self.finish()
+			return 0
 		myfile.close()
+		return 1
 
 	def handle(self):
 		addr=self.client_address
 		print "connected from ", addr
 		data=self.request.recv(BUFSIZE)
+		
 		fileinfo=json.loads(data)
 		filename='%s_%s' % (addr[0],fileinfo['filename'])
 		file_size=fileinfo['filesize']
@@ -92,33 +94,33 @@ class MyRequestHandler(BRH):
 				filecrc32 %s'\
 				% (filename,file_size,file_crc32))
 
-		tmp_path='d:\\TMP\\'
-		fin_path='d:\\sql_bak\\%s\\' % addr[0]
+		tmp_path='d:\\TMP_E\\TMP\\'
+		fin_path='d:\\TMP_E\\sql_bak\\%s\\' % addr[0]
 		tmp_file='%s%s' % (tmp_path,filename)
 
 		while 1:
-			self.recv_File(tmp_file,file_size)
-			print 'recv over, next to check file crc32...'
-			tmp_crc=self.to_crc32(tmp_file)
-			self.debug_log('the tmp_crc is : %s' % tmp_crc)
-			if tmp_crc == file_crc32:
-				self.request.send("success")
-				print 'recv success'
-				self.movefile(tmp_path,fin_path,filename)
-				print 'process success .'
-				break
-			else:
-				os.remove(tmp_file)
-				print 'recv failed, the file is incomplete'
-				self.request.send("retry")
-			
+			if self.recv_File(tmp_file,file_size):
+				print 'recv over, next to check file crc32...'
+				tmp_crc=self.to_crc32(tmp_file)
+				self.debug_log('the tmp_crc is : %s' % tmp_crc)
+				if tmp_crc == file_crc32:
+					self.request.send("success")
+					print '====recv success===='
+					self.movefile(tmp_path,fin_path,filename)
+					print 'process success .'
+					break
+				else:
+					os.remove(tmp_file)
+					print 'recv failed, the file is incomplete'
+					self.request.send("retry")
+			else : break
 
 	def setup(self):
 		self.debug_log('into thread')
 		self.request.settimeout(60)
 	def finish(self):
 		self.request.close()
-		self.debug_log("exit thread")
+		self.debug_log("exit the thread")
 
 class BackupServer(ThreadingTCPServer):
 	"""Backup Server"""
