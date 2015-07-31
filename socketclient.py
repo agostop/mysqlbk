@@ -11,7 +11,7 @@ DATABASE_NAME='skynew'
 BACKPATH='d:\\WLMP\\back_database\\'
 MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
 #time format "%Y%m%d%H%M%S"
-REMFILE='%s%s' % (BACKPATH,'remember.file')
+RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 
 def debug_log(msg):
@@ -20,21 +20,41 @@ def debug_log(msg):
 	else:
 		pass
 
-def remember_success_file(filename):
+def record_success_file(filename):
 	basename=os.path.basename(filename)
 	try:
-		rfile=open(REMFILE,'a')
+		rfile=open(RECORD_FILE,'a')
 		rfile.write('%s\n' % basename)
 	except:
 		print 'the file is open or write failed'
 	rfile.close()
 
-def unsend_file():
-	if not os.path.exists(REMFILE):
-		return 0
+def rm_Expired_file():
+	cur_time = time.time()
+	Expire_day = float(cur_time) - 60*60*24*30*3  # 3 month
+	debug_log('Expire time is %s' % Expire_day)
+	to_remove=[]
+	record_file = RECORD_FILE.split('\\')[-1]
+	debug_log('record_file is %s' % record_file)
 
+	for dir_path,subpaths,files in os.walk(BACKPATH):
+		files.remove(record_file)
+		for f in files:
+			_mtime=os.path.getmtime(os.path.join(dir_path,f))
+			debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
+			if _mtime < Expire_day:
+				debug_log('expired is :%s' % f )
+				to_remove.append(os.path.join(dir_path,f))
+	
+	for f in to_remove:
+		os.remove(f)
+
+def unsend_file():
 	f_list=[]
-	rfile=open(REMFILE,'r')
+	if not os.path.exists(RECORD_FILE):
+		return f_list
+
+	rfile=open(RECORD_FILE,'r')
 	while 1:
 		line = rfile.readline().strip()
 		if not line: break
@@ -43,7 +63,7 @@ def unsend_file():
 	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
-			if f == 'remember.file' : continue
+			if f == RECORD_FILE.split('\\')[-1] : continue
 			if f not in f_list:
 				f_path=os.path.join(dir_path,f)
 				ned2send_file_path.append(f_path)
@@ -73,9 +93,10 @@ def sendfiledata(filepath,filesize,tcpClient):
 	mydata = open(filepath, "rb")
 	sendsize = 0
 	Flag = True
+	debug_log('now send file : %s' % os.path.basename(filepath))
 	while Flag:
 		if file_size < sendsize+BUFSIZE:
-			debug_log('send remain data')
+			#debug_log('send remain data')
 			chunk = mydata.read(file_size - sendsize)
 			Flag = False
 		else:
@@ -112,7 +133,11 @@ def Sendfile(fileinfo):
 	filesize = fileinfo['filesize']
 	filename = fileinfo['filename']
 	filecrc32  = fileinfo['filecrc32']
-	ready_tosend_fileinfo = {'filename':filename,'filesize':filesize,'filecrc32':filecrc32}
+	ready_tosend_fileinfo = {\
+			'filename':filename,\
+			'filesize':filesize,\
+			'filecrc32':filecrc32\
+			}
 
 	data_tosend = json.dumps(ready_tosend_fileinfo)
 	#data_tosend = json.dumps(fileinfo)
@@ -120,20 +145,23 @@ def Sendfile(fileinfo):
 	tcpClient.sendall('%s' % data_tosend)
 
 	try:
-		while 1:
+		try_num=5
+		while try_num > 0 :
 			ready = tcpClient.recv(BUFSIZE).strip()
 			debug_log('rc is |%s|' % ready)
 			if ready == 'COME_ON':
 				rt=sendfiledata(filepath,filesize,tcpClient)
 				if rt:
 					print 'send finished'
-					remember_success_file(filepath)		
+					record_success_file(filepath)		
 					break
 				else:
-					print 'send failed, retrans file...server response: %s' % rt
+					print 'send failed, retrans file...server response: %s, try = %d'\
+							% (rt,try_num)
+					try_num-=1
 					#tcpClient.sendall('resend')
 			else:
-				print "server reponse : %s" % ready
+				print "server not ready to receive, server reponse : %s" % ready
 				break
 		return 1
 	except Exception,ex:
@@ -148,7 +176,7 @@ def sqlbak():
 	zip_file_name = '%s%s.zip' % (BACKPATH,TIMESTR)
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
-	sql_comm='%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s%s.sql' % (MYSQLDUMP,DATABASE_NAME,backfile)
+	sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
 	if os.system(sql_comm) == 0:
 		debug_log('NOTE: %s is backup successfully' % DATABASE_NAME)
 	else:
@@ -162,29 +190,35 @@ def sqlbak():
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
 		os._exit(1)
-	
+
+def get_fileinfo(fpath):
+	fileinfo={}
+	fname = os.path.basename(fpath)
+	fsize = os.stat(fpath).st_size
+	crc32val = file_crc32(fpath)
+	fileinfo['filename'] = fname
+	fileinfo['filepath'] = fpath
+	fileinfo['filesize'] = fsize
+	fileinfo['filecrc32'] = crc32val
+	return fileinfo
+
 if __name__ == '__main__':
 	while 1:
 		time.sleep(1) 
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
-		if cur_hour=='1838':
+		if cur_hour=='1735':
+			nedsend = []
+		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
+			new_sql_file = sqlbak()
 
-			nedsend=[]
-			new_sql_file = 'D:\\WLMP\\back_database\\20150727.zip'
-		#	new_sql_file = sqlbak()
-			nedsend=unsend_file()
+			nedsend = unsend_file()
 			nedsend.append(new_sql_file)
+			debug_log('%s'%nedsend)
 
 			for fpath in nedsend:
-				fileinfo={}
-				fname = os.path.basename(fpath)
-				fsize = os.stat(fpath).st_size
-				crc32val = file_crc32(fpath)
-				fileinfo['filename'] = fname
-				fileinfo['filepath'] = fpath
-				fileinfo['filesize'] = fsize
-				fileinfo['filecrc32'] = crc32val
-				ret=Sendfile(fileinfo)
-			
+				Sendfile(get_fileinfo(fpath))
+
+			print 'now start to remove Expired file'
+			rm_Expired_file()
 			time.sleep(60)
 

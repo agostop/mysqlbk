@@ -1,8 +1,7 @@
 #!python
 #coding=utf-8
 from SocketServer import (ThreadingTCPServer,BaseRequestHandler as BRH)
-from time import ctime
-import json,sys,os,socket,errno,binascii
+import json,sys,os,socket,errno,binascii,time
 
 DEBUG=1
 BUFSIZE=1024
@@ -13,6 +12,23 @@ class MyRequestHandler(BRH):
 			print msg
 		else:
 			pass
+
+	def rm_Expired_file(self,FILEPATH):
+		cur_time = time.time()
+		Expire_day = float(cur_time) - 60*60*24*30*3  # 3 month
+		self.debug_log('Expire time is %s' % Expire_day)
+		to_remove=[]
+
+		for dir_path,subpaths,files in os.walk(FILEPATH):
+			for f in files:
+				_mtime=os.path.getmtime(os.path.join(dir_path,f))
+				self.debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
+				if _mtime < Expire_day:
+					self.debug_log('expired is :%s' % f )
+					to_remove.append(os.path.join(dir_path,f))
+		
+		for f in to_remove:
+			os.remove(f)
 
 	def to_crc32(self,filename):
 		try:
@@ -108,6 +124,7 @@ class MyRequestHandler(BRH):
 					print '====recv success===='
 					self.movefile(tmp_path,fin_path,filename)
 					print 'process success .'
+					self.rm_Expired_file(fin_path)
 					break
 				else:
 					os.remove(tmp_file)
