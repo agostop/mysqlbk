@@ -5,6 +5,7 @@ import json,sys,os,socket,errno,binascii,time
 
 DEBUG=1
 BUFSIZE=1024
+Expire = 60*60*24*30*3 # 3 month
 
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
@@ -15,7 +16,7 @@ class MyRequestHandler(BRH):
 
 	def rm_Expired_file(self,FILEPATH):
 		cur_time = time.time()
-		Expire_day = float(cur_time) - 60*60*24*30*3  # 3 month
+		Expire_day = float(cur_time) - Expire
 		self.debug_log('Expire time is %s' % Expire_day)
 		to_remove=[]
 

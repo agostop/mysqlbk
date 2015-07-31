@@ -13,6 +13,7 @@ MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
 #time format "%Y%m%d%H%M%S"
 RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
+Expire=60*60*24*30*3 # 3 month
 
 def debug_log(msg):
 	if DEBUG:
@@ -31,7 +32,7 @@ def record_success_file(filename):
 
 def rm_Expired_file():
 	cur_time = time.time()
-	Expire_day = float(cur_time) - 60*60*24*30*3  # 3 month
+	Expire_day = float(cur_time) - Expire
 	debug_log('Expire time is %s' % Expire_day)
 	to_remove=[]
 	record_file = RECORD_FILE.split('\\')[-1]
