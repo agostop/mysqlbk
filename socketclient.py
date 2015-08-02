@@ -5,7 +5,7 @@ import json,os,time,zipfile,binascii,sys,sched
 
 DEBUG=1
 BUFSIZE=1024
-BAKSERV_IP = "127.0.0.1"
+BAKSERV_IP = "121.40.141.54"
 PORT = 10001
 DATABASE_NAME='skynew'
 BACKPATH='d:\\WLMP\\back_database\\'
@@ -39,7 +39,7 @@ def rm_Expired_file():
 	debug_log('record_file is %s' % record_file)
 
 	for dir_path,subpaths,files in os.walk(BACKPATH):
-		files.remove(record_file)
+		if record_file is in files: files.remove(record_file)
 		for f in files:
 			_mtime=os.path.getmtime(os.path.join(dir_path,f))
 			debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
@@ -47,8 +47,9 @@ def rm_Expired_file():
 				debug_log('expired is :%s' % f )
 				to_remove.append(os.path.join(dir_path,f))
 	
-	for f in to_remove:
-		os.remove(f)
+	if to_remove:
+		for f in to_remove:
+			os.remove(f)
 
 def unsend_file():
 	f_list=[]
@@ -207,7 +208,7 @@ if __name__ == '__main__':
 	while 1:
 		time.sleep(1) 
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
-		if cur_hour=='1735':
+		if cur_hour=='0100':
 			nedsend = []
 		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
 			new_sql_file = sqlbak()
