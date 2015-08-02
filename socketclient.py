@@ -5,7 +5,7 @@ import json,os,time,zipfile,binascii,sys,sched
 
 DEBUG=1
 BUFSIZE=1024
-BAKSERV_IP = "121.40.141.54"
+BAKSERV_IP = "127.0.0.1"
 PORT = 10001
 DATABASE_NAME='skynew'
 BACKPATH='d:\\WLMP\\back_database\\'
@@ -39,7 +39,7 @@ def rm_Expired_file():
 	debug_log('record_file is %s' % record_file)
 
 	for dir_path,subpaths,files in os.walk(BACKPATH):
-		if record_file is in files: files.remove(record_file)
+		if record_file in files: files.remove(record_file)
 		for f in files:
 			_mtime=os.path.getmtime(os.path.join(dir_path,f))
 			debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
