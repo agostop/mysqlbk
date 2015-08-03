@@ -6,6 +6,8 @@ import json,sys,os,socket,errno,binascii,time
 DEBUG=1
 BUFSIZE=1024
 Expire = 60*60*24*30*3 # 3 month
+TMP_PATH='d:\\TMP_E\\TMP\\'
+SQL_BAK='d:\\TMP_E\\sql_bak\\'
 
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
@@ -98,40 +100,48 @@ class MyRequestHandler(BRH):
 		addr=self.client_address
 		print "connected from ", addr
 		data=self.request.recv(BUFSIZE)
-		
-		fileinfo=json.loads(data)
-		filename='%s_%s' % (addr[0],fileinfo['filename'])
-		file_size=fileinfo['filesize']
-		file_size=int(file_size)
-		file_crc32=fileinfo['filecrc32']
+		print data
 
-		self.debug_log('fileinfo is :\n\
-				filename %s\n\
-				filesize %d\n\
-				filecrc32 %s'\
-				% (filename,file_size,file_crc32))
+		try:
+			#fileinfo=json.loads(data)
+			flist=json.loads(data)
+		except:
+			print 'error data format'
+			return 1
 
-		tmp_path='d:\\TMP_E\\TMP\\'
-		fin_path='d:\\TMP_E\\sql_bak\\%s\\' % addr[0]
-		tmp_file='%s%s' % (tmp_path,filename)
+		for fileinfo in flist:
+			filename='%s_%s' % (addr[0],fileinfo['filename'])
+			file_size=fileinfo['filesize']
+			file_size=int(file_size)
+			file_crc32=fileinfo['filecrc32']
 
-		while 1:
-			if self.recv_File(tmp_file,file_size):
-				print 'recv over, next to check file crc32...'
-				tmp_crc=self.to_crc32(tmp_file)
-				self.debug_log('the tmp_crc is : %s' % tmp_crc)
-				if tmp_crc == file_crc32:
-					self.request.send("success")
-					print '====recv success===='
-					self.movefile(tmp_path,fin_path,filename)
-					print 'process success .'
-					self.rm_Expired_file(fin_path)
-					break
-				else:
-					os.remove(tmp_file)
-					print 'recv failed, the file is incomplete'
-					self.request.send("retry")
-			else : break
+			self.debug_log('fileinfo is :\n\
+					filename %s\n\
+					filesize %d\n\
+					filecrc32 %s'\
+					% (filename,file_size,file_crc32))
+
+			tmp_path=TMP_PATH
+			fin_path='%s%s\\' % (SQL_BAK,addr[0])
+			tmp_file='%s%s' % (tmp_path,filename)
+
+			while 1:
+				if self.recv_File(tmp_file,file_size):
+					print 'recv over, next to check file crc32...'
+					tmp_crc=self.to_crc32(tmp_file)
+					self.debug_log('the tmp_crc is : %s' % tmp_crc)
+					if tmp_crc == file_crc32:
+						self.request.send("success")
+						print '====recv success===='
+						self.movefile(tmp_path,fin_path,filename)
+						print 'process success .'
+						self.rm_Expired_file(fin_path)
+						break
+					else:
+						os.remove(tmp_file)
+						print 'recv failed, the file is incomplete'
+						self.request.send("retry")
+				else : break
 
 	def setup(self):
 		self.debug_log('into thread')

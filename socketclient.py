@@ -1,7 +1,7 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile,binascii,sys,sched
+import json,os,time,zipfile,binascii,sys
 
 DEBUG=1
 BUFSIZE=1024
@@ -39,7 +39,7 @@ def rm_Expired_file():
 	debug_log('record_file is %s' % record_file)
 
 	for dir_path,subpaths,files in os.walk(BACKPATH):
-		if record_file in files: files.remove(record_file)
+		files.remove(record_file)
 		for f in files:
 			_mtime=os.path.getmtime(os.path.join(dir_path,f))
 			debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
@@ -47,30 +47,9 @@ def rm_Expired_file():
 				debug_log('expired is :%s' % f )
 				to_remove.append(os.path.join(dir_path,f))
 	
-	if to_remove:
-		for f in to_remove:
-			os.remove(f)
+	for f in to_remove:
+		os.remove(f)
 
-def unsend_file():
-	f_list=[]
-	if not os.path.exists(RECORD_FILE):
-		return f_list
-
-	rfile=open(RECORD_FILE,'r')
-	while 1:
-		line = rfile.readline().strip()
-		if not line: break
-		f_list.append(line)
-
-	ned2send_file_path = []
-	for dir_path,subpaths,files in os.walk(BACKPATH):
-		for f in files:
-			if f == RECORD_FILE.split('\\')[-1] : continue
-			if f not in f_list:
-				f_path=os.path.join(dir_path,f)
-				ned2send_file_path.append(f_path)
-
-	return ned2send_file_path
 
 def file_crc32(filename):
 	try:
@@ -119,52 +98,66 @@ def sendfiledata(filepath,filesize,tcpClient):
 	else:
 		return 0
 
-def Sendfile(fileinfo):
+def con_server():
 	tcpClient = socket(AF_INET,SOCK_STREAM)
-	e=0  
-	try:  
-	    tcpClient.connect((BAKSERV_IP,PORT))
-	except tcpClient.settimeout,e:  
-	    return 'connect timeout'  
-	except e:  
-	    return 'connect have a error'  
+	e=0
+	try_num = 0
+	while try_num != 5 :
+		try:
+			tcpClient.connect((BAKSERV_IP,PORT))
+			break
+		except tcpClient.settimeout,e:
+			try_num+=1
+
+	if try_num == 5:
+		return 0
+
+	return tcpClient
+
+def Sendfile(fileinfo):
+	
+	tcpClient=con_server()
+	if tcpClient:
+		pass
+	else:
+		return 0
 
 	debug_log('connect to server...')
 
-	filepath = fileinfo['filepath']
-	filesize = fileinfo['filesize']
-	filename = fileinfo['filename']
-	filecrc32  = fileinfo['filecrc32']
-	ready_tosend_fileinfo = {\
-			'filename':filename,\
-			'filesize':filesize,\
-			'filecrc32':filecrc32\
-			}
+	ready_data = []
+	for fdict in fileinfo:
+		_tmp = {}
+		_tmp = {'filename':fdict['filename'] ,\
+						'filesize':fdict['filesize'] ,\
+						'filecrc32':fdict['filecrc32']}
+		ready_data.append(_tmp)
 
-	data_tosend = json.dumps(ready_tosend_fileinfo)
-	#data_tosend = json.dumps(fileinfo)
-	debug_log('send file info data')
+	debug_log('send file info data : %s' % ready_data)
+	data_tosend = json.dumps(ready_data)
 	tcpClient.sendall('%s' % data_tosend)
 
 	try:
-		try_num=5
-		while try_num > 0 :
-			ready = tcpClient.recv(BUFSIZE).strip()
-			debug_log('rc is |%s|' % ready)
-			if ready == 'COME_ON':
-				rt=sendfiledata(filepath,filesize,tcpClient)
-				if rt:
-					print 'send finished'
-					record_success_file(filepath)		
-					break
+		for fdict in fileinfo:
+			filepath = fdict['filepath']
+			debug_log('%s'%filepath)
+			try_num=5
+			while try_num > 0 :
+				ready = tcpClient.recv(BUFSIZE).strip()
+				debug_log('rc is |%s|' % ready)
+				if ready == 'COME_ON':
+					rt=sendfiledata(filepath,fdict['filesize'],tcpClient)
+					if rt:
+						print 'send finished'
+						record_success_file(filepath)		
+						break
+					else:
+						print 'send failed, retrans file...server response: %s, try = %d'\
+								% (rt,try_num)
+						try_num-=1
+						#tcpClient.sendall('resend')
 				else:
-					print 'send failed, retrans file...server response: %s, try = %d'\
-							% (rt,try_num)
-					try_num-=1
-					#tcpClient.sendall('resend')
-			else:
-				print "server not ready to receive, server reponse : %s" % ready
-				break
+					print "server not ready to receive, server reponse : %s" % ready
+					break
 		return 1
 	except Exception,ex:
 		print Exception,":",ex
@@ -193,32 +186,65 @@ def sqlbak():
 		debug_log('ERROR: cannot find the sql back file.')
 		os._exit(1)
 
-def get_fileinfo(fpath):
-	fileinfo={}
-	fname = os.path.basename(fpath)
-	fsize = os.stat(fpath).st_size
-	crc32val = file_crc32(fpath)
-	fileinfo['filename'] = fname
-	fileinfo['filepath'] = fpath
-	fileinfo['filesize'] = fsize
-	fileinfo['filecrc32'] = crc32val
+def get_fileinfo(allfile):
+	fileinfo=[]
+	for fpath in allfile:
+		_info={}
+		debug_log('the get_fileinfo fun , fpath is %s'%fpath)
+		fname = os.path.basename(fpath)
+		fsize = os.stat(fpath).st_size
+		crc32val = file_crc32(fpath)
+		_info['filename'] = fname
+		_info['filepath'] = fpath
+		_info['filesize'] = fsize
+		_info['filecrc32'] = crc32val
+		fileinfo.append(_info)
+
 	return fileinfo
+
+def unsend_file():
+	f_list=[]
+	if not os.path.exists(RECORD_FILE):
+		return f_list
+
+	rfile=open(RECORD_FILE,'r')
+	while 1:
+		line = rfile.readline().strip()
+		if not line: break
+		f_list.append(line)
+
+	if not f_list:
+		return f_list
+
+	ned2send_file_path = []
+	for dir_path,subpaths,files in os.walk(BACKPATH):
+		for f in files:
+			if f == RECORD_FILE.split('\\')[-1] : continue
+			if f not in f_list:
+				f_path=os.path.join(dir_path,f)
+				ned2send_file_path.append(f_path)
+
+	return ned2send_file_path
 
 if __name__ == '__main__':
 	while 1:
 		time.sleep(1) 
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
+		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
 		if cur_hour=='0100':
 			nedsend = []
 		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
 			new_sql_file = sqlbak()
 
 			nedsend = unsend_file()
-			nedsend.append(new_sql_file)
 			debug_log('%s'%nedsend)
+			if new_sql_file not in nedsend:
+				nedsend.append(new_sql_file)
 
-			for fpath in nedsend:
-				Sendfile(get_fileinfo(fpath))
+			nedsend = get_fileinfo(nedsend)
+			debug_log('%s'%nedsend)
+			if not Sendfile(nedsend):
+				print 'connect to server is failed!'
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
