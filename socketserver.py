@@ -40,7 +40,7 @@ class MyRequestHandler(BRH):
 			str = f.read(blocksize)
 			crc = 0
 			while len(str) != 0:
-				crc = binascii.crc32(str,crc) & 0xffffffff #is to get unsigned int value . the crc my to like -132423  if not to this
+				crc = binascii.crc32(str,crc) & 0xffffffff #is to get unsigned int value . the crc may to like -132423  if not to this
 				str = f.read(blocksize)
 			f.close()
 

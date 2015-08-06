@@ -1,7 +1,7 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile,binascii,sys
+import json,os,time,zipfile,binascii,sys,struct
 
 DEBUG=1
 BUFSIZE=1024
@@ -10,6 +10,7 @@ PORT = 10001
 DATABASE_NAME='skynew'
 BACKPATH='d:\\WLMP\\back_database\\'
 MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
+BACKUP_TIME='0100'
 #time format "%Y%m%d%H%M%S"
 RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
 TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
@@ -35,11 +36,13 @@ def rm_Expired_file():
 	Expire_day = float(cur_time) - Expire
 	debug_log('Expire time is %s' % Expire_day)
 	to_remove=[]
+	
 	record_file = RECORD_FILE.split('\\')[-1]
 	debug_log('record_file is %s' % record_file)
 
 	for dir_path,subpaths,files in os.walk(BACKPATH):
-		files.remove(record_file)
+		if os.path.exists(RECORD_FILE):
+			files.remove(record_file)
 		for f in files:
 			_mtime=os.path.getmtime(os.path.join(dir_path,f))
 			debug_log('the file name is : %s , the mtime is : %s' % (f,_mtime) )
@@ -99,20 +102,35 @@ def sendfiledata(filepath,filesize,tcpClient):
 		return 0
 
 def con_server():
-	tcpClient = socket(AF_INET,SOCK_STREAM)
-	e=0
-	try_num = 0
-	while try_num != 5 :
-		try:
-			tcpClient.connect((BAKSERV_IP,PORT))
-			break
-		except tcpClient.settimeout,e:
-			try_num+=1
-
-	if try_num == 5:
+	timeout=6
+	tcpClient=None
+	try:
+		# create a ipv4 socket object
+		tcpClient = socket(AF_INET)
+		# set reuseaddr option to avoid 10048 socket error
+		tcpClient.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+		# set struct linger{l_onoff=1,l_linger=0} to avoid 10048 socket error
+		tcpClient.setsockopt(SOL_SOCKET, SO_LINGER, struct.pack('ii', 1, 0))
+		# resize socket recv buffer 8K->32K to improve browser releated application performance
+		tcpClient.setsockopt(SOL_SOCKET, SO_RCVBUF, 32*1024)
+		# disable negal algorithm to send http request quickly.
+		tcpClient.setsockopt(SOL_TCP, TCP_NODELAY, True)
+		# set a short timeout to trigger timeout retry more quickly.
+		tcpClient.settimeout(timeout)
+	except (error, OSError) :
+		if tcpClient:
+			tcpClient.close()
 		return 0
 
-	return tcpClient
+	max_retry = 5
+	for i in xrange(max_retry):
+		try:
+			tcpClient.connect((BAKSERV_IP,PORT))
+			return tcpClient
+		except:
+			time.sleep(30)
+
+	return 0
 
 def Sendfile(fileinfo):
 	
@@ -140,8 +158,8 @@ def Sendfile(fileinfo):
 		for fdict in fileinfo:
 			filepath = fdict['filepath']
 			debug_log('%s'%filepath)
-			try_num=5
-			while try_num > 0 :
+			max_retry=5
+			for i in xrange(max_retry):
 				ready = tcpClient.recv(BUFSIZE).strip()
 				debug_log('rc is |%s|' % ready)
 				if ready == 'COME_ON':
@@ -151,10 +169,7 @@ def Sendfile(fileinfo):
 						record_success_file(filepath)		
 						break
 					else:
-						print 'send failed, retrans file...server response: %s, try = %d'\
-								% (rt,try_num)
-						try_num-=1
-						#tcpClient.sendall('resend')
+						print 'send failed, retrans file...try %d' % i
 				else:
 					print "server not ready to receive, server reponse : %s" % ready
 					break
@@ -171,6 +186,10 @@ def sqlbak():
 	zip_file_name = '%s%s.zip' % (BACKPATH,TIMESTR)
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
+	if not os.path.isfile(MYSQLDUMP):
+		print 'the mysqlbak.exe is not in d:\\wlmp\\mysql\\bin'
+		return 0
+
 	sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
 	if os.system(sql_comm) == 0:
 		debug_log('NOTE: %s is backup successfully' % DATABASE_NAME)
@@ -184,7 +203,7 @@ def sqlbak():
 		return zip_file_name
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
-		os._exit(1)
+		return 0
 
 def get_fileinfo(allfile):
 	fileinfo=[]
@@ -227,24 +246,38 @@ def unsend_file():
 	return ned2send_file_path
 
 if __name__ == '__main__':
+	if os.name == 'nt':
+		import ctypes
+		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
+
+	print 'backup is start up:\n\
+Server IP : %s\n\
+PORT : %s\n\
+DATABASE_NAME : %s\n\
+BACKPATH : %s\n\
+MYSQLDUMP : %s\n\
+BACKUP_TIME : %s'\
+% (BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
 	while 1:
-		time.sleep(1) 
+		time.sleep(1)
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
 		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
-		if cur_hour=='0100':
+		if cur_hour==BACKUP_TIME:
 			nedsend = []
 		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
 			new_sql_file = sqlbak()
 
 			nedsend = unsend_file()
 			debug_log('%s'%nedsend)
-			if new_sql_file not in nedsend:
-				nedsend.append(new_sql_file)
+			if new_sql_file :
+				if new_sql_file not in nedsend:
+					nedsend.append(new_sql_file)
 
-			nedsend = get_fileinfo(nedsend)
-			debug_log('%s'%nedsend)
-			if not Sendfile(nedsend):
-				print 'connect to server is failed!'
+			if nedsend:
+				nedsend = get_fileinfo(nedsend)
+				debug_log('%s'%nedsend)
+				if not Sendfile(nedsend):
+					print 'connect to server is failed!'
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
