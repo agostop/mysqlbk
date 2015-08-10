@@ -1,20 +1,37 @@
 #!python
 #coding=utf-8
 from socket import *
-import json,os,time,zipfile,binascii,sys,struct
+import os
+import sys
+import time
+import json
+import zlib
+import zipfile
+import binascii
+import struct
+import ConfigParser
 
-DEBUG=1
-BUFSIZE=1024
-BAKSERV_IP = "127.0.0.1"
-PORT = 10001
-DATABASE_NAME='skynew'
-BACKPATH='d:\\WLMP\\back_database\\'
-MYSQLDUMP='d:\\WLMP\\MySQL\\bin\\mysqlbak.exe'
-BACKUP_TIME='0100'
-#time format "%Y%m%d%H%M%S"
-RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
-TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
-Expire=60*60*24*30*3 # 3 month
+def parseConfig():
+	CONFIG=ConfigParser.ConfigParser()
+	CONFIG_FILE_NAME=os.path.splitext(os.path.abspath(__file__))[0]+'.ini'
+	if os.path.exists(CONFIG_FILE_NAME):
+		CONFIG.read(CONFIG_FILE_NAME)
+	else:
+		os._exit(1)
+
+	global DEBUG,IDENTITY,BUFSIZE,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME,Expire,RECORD_FILE
+	one_month=60*60*24*30
+	DEBUG = int(CONFIG.get('client','DEBUG'))
+	IDENTITY = (CONFIG.get('client','IDENTITY')).decode('utf-8')
+	BUFSIZE = int(CONFIG.get('client','BUFSIZE'))
+	BAKSERV_IP = CONFIG.get('client','BAKSERV_IP')
+	PORT = int(CONFIG.get('client','PORT'))
+	DATABASE_NAME = CONFIG.get('client','DATABASE_NAME')
+	BACKPATH = CONFIG.get('client','BACKPATH')
+	MYSQLDUMP = CONFIG.get('client','MYSQLDUMP')
+	BACKUP_TIME = CONFIG.get('client','BACKUP_TIME')
+	Expire = float(int(CONFIG.get('client','Expire')) * one_month)
+	RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
 
 def debug_log(msg):
 	if DEBUG:
@@ -24,17 +41,20 @@ def debug_log(msg):
 
 def record_success_file(filename):
 	basename=os.path.basename(filename)
-	try:
-		rfile=open(RECORD_FILE,'a')
-		rfile.write('%s\n' % basename)
-	except:
-		print 'the file is open or write failed'
+	#try:
+	rfile=open(RECORD_FILE,'a')
+	rfile.write('%s\n' % basename)
+	#except:
+	#	if rfile:
+	#		rfile.close()
+	#	print 'the file is open or write failed'
 	rfile.close()
 
 def rm_Expired_file():
 	cur_time = time.time()
-	Expire_day = float(cur_time) - Expire
-	debug_log('Expire time is %s' % Expire_day)
+	debug_log('cur_time is : %s\nExpire is : %s' % (float(cur_time),float(Expire)))
+	Expire_day = float(cur_time) - float(Expire)
+	debug_log('Expire time is %f' % Expire_day)
 	to_remove=[]
 	
 	record_file = RECORD_FILE.split('\\')[-1]
@@ -53,6 +73,8 @@ def rm_Expired_file():
 	for f in to_remove:
 		os.remove(f)
 
+def compress_data(data_str):
+	return zlib.compress(data_str,zlib.Z_BEST_COMPRESSION)
 
 def file_crc32(filename):
 	try:
@@ -122,6 +144,7 @@ def con_server():
 			tcpClient.close()
 		return 0
 
+	print 'try to connect server %s' % (BAKSERV_IP)
 	max_retry = 5
 	for i in xrange(max_retry):
 		try:
@@ -132,26 +155,34 @@ def con_server():
 
 	return 0
 
+def Prepare_data(fileinfo):
+	identity = IDENTITY.encode('utf-8')
+
+	_data = []
+	for fdict in fileinfo:
+		_tmp = {}
+		_tmp = {
+						'filename':fdict['filename'] ,
+						'filesize':fdict['filesize'] ,
+						'filecrc32':fdict['filecrc32'],
+						}
+		_data.append(_tmp)
+
+	_data.insert(0,identity)
+
+	debug_log('send file info data : %s' % _data)
+	return compress_data(json.dumps(_data))
+
 def Sendfile(fileinfo):
-	
+	debug_log('connect to server...')
+
 	tcpClient=con_server()
 	if tcpClient:
 		pass
 	else:
 		return 0
 
-	debug_log('connect to server...')
-
-	ready_data = []
-	for fdict in fileinfo:
-		_tmp = {}
-		_tmp = {'filename':fdict['filename'] ,\
-						'filesize':fdict['filesize'] ,\
-						'filecrc32':fdict['filecrc32']}
-		ready_data.append(_tmp)
-
-	debug_log('send file info data : %s' % ready_data)
-	data_tosend = json.dumps(ready_data)
+	data_tosend = Prepare_data(fileinfo)
 	tcpClient.sendall('%s' % data_tosend)
 
 	try:
@@ -177,13 +208,17 @@ def Sendfile(fileinfo):
 	except Exception,ex:
 		print Exception,":",ex
 		tcpClient.close()
+	except KeyboardInterrupt:
+		if tcpClient:
+			tcpClient.close()
 
 def sqlbak():
+	TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 	if not os.path.exists(BACKPATH):
 		os.mkdir(BACKPATH)
 
 	backfile = '%s%s.sql' % (BACKPATH,TIMESTR)
-	zip_file_name = '%s%s.zip' % (BACKPATH,TIMESTR)
+	zip_file_name = '%s%s_%s.zip' % (BACKPATH,DATABASE_NAME,TIMESTR)
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
 	if not os.path.isfile(MYSQLDUMP):
@@ -191,16 +226,24 @@ def sqlbak():
 		return 0
 
 	sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
-	if os.system(sql_comm) == 0:
-		debug_log('NOTE: %s is backup successfully' % DATABASE_NAME)
-	else:
-		debug_log('ERROR: %s is backup Failed, sql_comm is exec failed.' % DATABASE_NAME)
 
+	os.system(sql_comm) # can't return correct value
+	
 	if os.path.exists(backfile):
-		f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
-		f.write(backfile)
-		os.remove(backfile)
-		return zip_file_name
+		d=open(backfile)
+		data=d.read()
+		l=len(data)
+		d.close()
+
+		if l == 0:
+			print 'ERROR: %s is backup Failed, sql_comm is exec failed.' % DATABASE_NAME
+			return 0
+		else:
+			f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
+			f.write(backfile)
+			os.remove(backfile)
+			return zip_file_name
+
 	else:
 		debug_log('ERROR: cannot find the sql back file.')
 		return 0
@@ -245,19 +288,26 @@ def unsend_file():
 
 	return ned2send_file_path
 
-if __name__ == '__main__':
+def main():
 	if os.name == 'nt':
 		import ctypes
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
+	
+	parseConfig()
 
-	print 'backup is start up:\n\
+	print '\
+--------------------------------------------\n\
+backup is start up !\n\
+Identity : %s\n\
 Server IP : %s\n\
 PORT : %s\n\
 DATABASE_NAME : %s\n\
 BACKPATH : %s\n\
 MYSQLDUMP : %s\n\
-BACKUP_TIME : %s'\
-% (BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
+BACKUP_TIME : %s\n\
+---------------------------------------------'\
+% (IDENTITY,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
+
 	while 1:
 		time.sleep(1)
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
@@ -281,5 +331,8 @@ BACKUP_TIME : %s'\
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
+			print '=============process over=============='
 			time.sleep(60)
 
+if __name__ == '__main__':
+	main()

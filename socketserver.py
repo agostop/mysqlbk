@@ -1,7 +1,14 @@
 #!python
 #coding=utf-8
 from SocketServer import (ThreadingTCPServer,BaseRequestHandler as BRH)
-import json,sys,os,socket,errno,binascii,time
+import sys
+import os
+import json
+import socket
+import errno
+import binascii
+import time
+import zlib
 
 DEBUG=1
 BUFSIZE=1024
@@ -15,6 +22,13 @@ class MyRequestHandler(BRH):
 			print msg
 		else:
 			pass
+	
+	def decompress_data(self,data_str):
+		try:
+			data=zlib.decompress(data_str)
+			return data
+		except:
+			return 'error data'
 
 	def rm_Expired_file(self,FILEPATH):
 		cur_time = time.time()
@@ -50,11 +64,14 @@ class MyRequestHandler(BRH):
 
 		return '%08x' % crc
 
-	def movefile(self,tmp,fin,fname):
+	def movefile(self,tmp,fin,fname,ident):
+		finish_dir='%s_%s'%(fin,ident)
 		tmp_path='%s%s' % (tmp,fname)
-		fin_path='%s%s' % (fin,fname)
-		if not os.path.exists(fin) or not os.path.isdir(fin):
-			os.mkdir(fin)
+		fin_path='%s\\%s' % (finish_dir,fname)
+		self.debug_log('%s\n%s\n%s'%(finish_dir,tmp_path,fin_path))
+		
+		if not os.path.exists(finish_dir) or not os.path.isdir(finish_dir):
+			os.mkdir(finish_dir)
 		elif os.path.exists(fin_path):
 			os.remove(fin_path)
 		os.rename(tmp_path,fin_path)
@@ -100,6 +117,7 @@ class MyRequestHandler(BRH):
 		addr=self.client_address
 		print "connected from ", addr
 		data=self.request.recv(BUFSIZE)
+		data=self.decompress_data(data)
 		print data
 
 		try:
@@ -108,6 +126,8 @@ class MyRequestHandler(BRH):
 		except:
 			print 'error data format'
 			return 1
+
+		identity=flist.pop(0)
 
 		for fileinfo in flist:
 			filename='%s_%s' % (addr[0],fileinfo['filename'])
@@ -122,7 +142,7 @@ class MyRequestHandler(BRH):
 					% (filename,file_size,file_crc32))
 
 			tmp_path=TMP_PATH
-			fin_path='%s%s\\' % (SQL_BAK,addr[0])
+			fin_path='%s%s' % (SQL_BAK,addr[0])
 			tmp_file='%s%s' % (tmp_path,filename)
 
 			while 1:
@@ -133,7 +153,7 @@ class MyRequestHandler(BRH):
 					if tmp_crc == file_crc32:
 						self.request.send("success")
 						print '====recv success===='
-						self.movefile(tmp_path,fin_path,filename)
+						self.movefile(tmp_path,fin_path,filename,identity)
 						print 'process success .'
 						self.rm_Expired_file(fin_path)
 						break
@@ -180,7 +200,9 @@ class BackupServer(ThreadingTCPServer):
 			ThreadingTCPServer.handle_error(self, *args)
 
 if __name__ == '__main__':
-#	tcpSer=ThreadingTCPServer(("",10001),MyRequestHandler)
 	tcpSer=BackupServer(("",10001),MyRequestHandler)
 	print "waiting for connection"
-	tcpSer.serve_forever()
+	try :
+		tcpSer.serve_forever()
+	except KeyboardInterrupt:
+		tcpSer.finish()
