@@ -264,7 +264,7 @@ def get_fileinfo(allfile):
 
 	return fileinfo
 
-def unsend_file():
+def unsend_file(new_sql_file):
 	f_list=[]
 	if not os.path.exists(RECORD_FILE):
 		return f_list
@@ -286,6 +286,15 @@ def unsend_file():
 				f_path=os.path.join(dir_path,f)
 				ned2send_file_path.append(f_path)
 
+			debug_log('%s'%ned2send_file_path)
+			if new_sql_file :
+				if new_sql_file not in ned2send_file_path:
+					ned2send_file_path.append(new_sql_file)
+
+			if ned2send_file_path:
+				ned2send_file_path = get_fileinfo(ned2send_file_path)
+				debug_log('%s'%ned2send_file_path)
+	
 	return ned2send_file_path
 
 def main():
@@ -317,17 +326,8 @@ BACKUP_TIME : %s\n\
 		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
 			new_sql_file = sqlbak()
 
-			nedsend = unsend_file()
-			debug_log('%s'%nedsend)
-			if new_sql_file :
-				if new_sql_file not in nedsend:
-					nedsend.append(new_sql_file)
-
-			if nedsend:
-				nedsend = get_fileinfo(nedsend)
-				debug_log('%s'%nedsend)
-				if not Sendfile(nedsend):
-					print 'connect to server is failed!'
+			if not Sendfile(unsend_file(new_sql_file)):
+				print 'connect to server is failed!'
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
