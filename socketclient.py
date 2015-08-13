@@ -11,6 +11,20 @@ import binascii
 import struct
 import ConfigParser
 
+def print_info():
+	print '\
+--------------------------------------------\n\
+backup is start up !\n\
+Identity : %s\n\
+Server IP : %s\n\
+PORT : %s\n\
+DATABASE_NAME : %s\n\
+BACKPATH : %s\n\
+MYSQLDUMP : %s\n\
+BACKUP_TIME : %s\n\
+---------------------------------------------'\
+% (IDENTITY,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
+
 def parseConfig():
 	CONFIG=ConfigParser.ConfigParser()
 	CONFIG_FILE_NAME=os.path.splitext(os.path.abspath(__file__))[0]+'.ini'
@@ -118,9 +132,9 @@ def sendfiledata(filepath,filesize,tcpClient):
 	debug_log('wait server response')
 	recv=tcpClient.recv(BUFSIZE)
 	debug_log('recv the message : %s' % recv)
-	if recv == 'success':
+	if recv == 'SUCCESS':
 		return 1
-	else:
+	elif recv == 'RETRY':
 		return 0
 
 def con_server():
@@ -131,12 +145,6 @@ def con_server():
 		tcpClient = socket(AF_INET)
 		# set reuseaddr option to avoid 10048 socket error
 		tcpClient.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-		# set struct linger{l_onoff=1,l_linger=0} to avoid 10048 socket error
-		tcpClient.setsockopt(SOL_SOCKET, SO_LINGER, struct.pack('ii', 1, 0))
-		# resize socket recv buffer 8K->32K to improve browser releated application performance
-		tcpClient.setsockopt(SOL_SOCKET, SO_RCVBUF, 32*1024)
-		# disable negal algorithm to send http request quickly.
-		tcpClient.setsockopt(SOL_TCP, TCP_NODELAY, True)
 		# set a short timeout to trigger timeout retry more quickly.
 		tcpClient.settimeout(timeout)
 	except (error, OSError) :
@@ -190,21 +198,33 @@ def Sendfile(fileinfo):
 			filepath = fdict['filepath']
 			debug_log('%s'%filepath)
 			max_retry=5
-			for i in xrange(max_retry):
+			#for i in xrange(max_retry):
+			while True:
 				ready = tcpClient.recv(BUFSIZE).strip()
 				debug_log('rc is |%s|' % ready)
 				if ready == 'COME_ON':
 					rt=sendfiledata(filepath,fdict['filesize'],tcpClient)
-					if rt:
+					if rt == 1:
 						print 'send finished'
 						record_success_file(filepath)		
 						break
+					elif rt == 2:
+						print 'the server recvie failed, server have a error.'
+						break
 					else:
 						print 'send failed, retrans file...try %d' % i
+						max_retry-=1
+						if max_retry == 0:
+							tcpClient.sendall('MAX_FAILED')
+							break
+						else :
+							tcpClient.sendall('TRY_AGAIN')
+							
 				else:
 					print "server not ready to receive, server reponse : %s" % ready
 					break
-		return 1
+
+		return 0
 	except Exception,ex:
 		print Exception,":",ex
 		tcpClient.close()
@@ -267,8 +287,9 @@ def get_fileinfo(allfile):
 def unsend_file(new_sql_file):
 	f_list=[]
 	if not os.path.exists(RECORD_FILE):
-		return f_list
-
+		f_list.append(new_sql_file)
+		return get_fileinfo(f_list)
+	
 	rfile=open(RECORD_FILE,'r')
 	while 1:
 		line = rfile.readline().strip()
@@ -278,6 +299,7 @@ def unsend_file(new_sql_file):
 	if not f_list:
 		return f_list
 
+	debug_log('%s' % new_sql_file)
 	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
@@ -297,37 +319,25 @@ def unsend_file(new_sql_file):
 	
 	return ned2send_file_path
 
-def main():
+def add_title():
 	if os.name == 'nt':
 		import ctypes
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
-	
-	parseConfig()
 
-	print '\
---------------------------------------------\n\
-backup is start up !\n\
-Identity : %s\n\
-Server IP : %s\n\
-PORT : %s\n\
-DATABASE_NAME : %s\n\
-BACKPATH : %s\n\
-MYSQLDUMP : %s\n\
-BACKUP_TIME : %s\n\
----------------------------------------------'\
-% (IDENTITY,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
+def main():
+	add_title()
+	parseConfig()
 
 	while 1:
 		time.sleep(1)
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
 		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
 		if cur_hour==BACKUP_TIME:
-			nedsend = []
-		#	new_sql_file = 'D:\\WLMP\\back_database\\20150805.zip'
-			new_sql_file = sqlbak()
 
-			if not Sendfile(unsend_file(new_sql_file)):
-				print 'connect to server is failed!'
+			new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150807.zip'
+		#	new_sql_file = sqlbak()
+
+			Sendfile(unsend_file(new_sql_file))
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
@@ -335,4 +345,7 @@ BACKUP_TIME : %s\n\
 			time.sleep(60)
 
 if __name__ == '__main__':
+	#try :
 	main()
+	#except KeyboardInterrupt:
+	#	print 'quit'

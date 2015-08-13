@@ -68,7 +68,7 @@ class MyRequestHandler(BRH):
 		finish_dir='%s_%s'%(fin,ident)
 		tmp_path='%s%s' % (tmp,fname)
 		fin_path='%s\\%s' % (finish_dir,fname)
-		self.debug_log('%s\n%s\n%s'%(finish_dir,tmp_path,fin_path))
+		self.debug_log('the dir info is :%s\n%s\n%s'%(finish_dir,tmp_path,fin_path))
 		
 		if not os.path.exists(finish_dir) or not os.path.isdir(finish_dir):
 			os.mkdir(finish_dir)
@@ -76,7 +76,7 @@ class MyRequestHandler(BRH):
 			os.remove(fin_path)
 		os.rename(tmp_path,fin_path)
 
-	def recv_File(self,tmp_file,file_size):
+	def recv_File(self, tmp_file, file_size, file_crc32):
 		try:
 			myfile=open(tmp_file , 'wb')
 		except IOError:
@@ -107,11 +107,29 @@ class MyRequestHandler(BRH):
 		except :
 			myfile.close()
 			if os.path.exists(tmp_file):
-				os.remove(tmpfile)
+				os.remove(tmp_file)
 			print "close socket , have a error."
 			return 0
 		myfile.close()
-		return 1
+
+		print 'recv over, next to check file crc32...'
+		tmp_crc=self.to_crc32(tmp_file)
+		self.debug_log('the tmp_crc is : %s' % tmp_crc)
+		if tmp_crc == file_crc32:
+			self.request.send("SUCCESS")
+			print '====recv success===='
+			print 'process success .'
+			return 1
+		else:
+			if os.path.exists(tmp_file):
+				os.remove(tmp_file)
+			print 'recv failed, the file is incomplete'
+			self.request.send("RETRY")
+			data=self.request.recv(BUFSIZE)
+			if data == 'TRY_AGAIN':
+				return 0
+			elif data == 'MAX_FAILED':
+				return 2
 
 	def handle(self):
 		addr=self.client_address
@@ -121,7 +139,6 @@ class MyRequestHandler(BRH):
 		print data
 
 		try:
-			#fileinfo=json.loads(data)
 			flist=json.loads(data)
 		except:
 			print 'error data format'
@@ -130,10 +147,14 @@ class MyRequestHandler(BRH):
 		identity=flist.pop(0)
 
 		for fileinfo in flist:
+			self.debug_log('to move file')
 			filename='%s_%s' % (addr[0],fileinfo['filename'])
 			file_size=fileinfo['filesize']
 			file_size=int(file_size)
 			file_crc32=fileinfo['filecrc32']
+			tmp_path=TMP_PATH
+			fin_path='%s%s' % (SQL_BAK,addr[0])
+			tmp_file='%s%s' % (tmp_path,filename)
 
 			self.debug_log('fileinfo is :\n\
 					filename %s\n\
@@ -141,27 +162,23 @@ class MyRequestHandler(BRH):
 					filecrc32 %s'\
 					% (filename,file_size,file_crc32))
 
-			tmp_path=TMP_PATH
-			fin_path='%s%s' % (SQL_BAK,addr[0])
-			tmp_file='%s%s' % (tmp_path,filename)
-
-			while 1:
-				if self.recv_File(tmp_file,file_size):
-					print 'recv over, next to check file crc32...'
-					tmp_crc=self.to_crc32(tmp_file)
-					self.debug_log('the tmp_crc is : %s' % tmp_crc)
-					if tmp_crc == file_crc32:
-						self.request.send("success")
-						print '====recv success===='
+			try :
+				while True:
+					rt = self.recv_File(tmp_file,file_size,file_crc32)
+					if rt == 1:
+						print 'Recv OK'
 						self.movefile(tmp_path,fin_path,filename,identity)
-						print 'process success .'
 						self.rm_Expired_file(fin_path)
 						break
+					elif rt == 2:
+						print 'Recv failed, and max retry.'
+						break
 					else:
-						os.remove(tmp_file)
-						print 'recv failed, the file is incomplete'
-						self.request.send("retry")
-				else : break
+						pass
+
+			except :
+				if os.path.exists(tmp_file):
+					os.remove(tmp_file)
 
 	def setup(self):
 		self.debug_log('into thread')
@@ -199,10 +216,16 @@ class BackupServer(ThreadingTCPServer):
 			del exc_info, error
 			ThreadingTCPServer.handle_error(self, *args)
 
+def add_title():
+	if os.name == 'nt':
+		import ctypes
+		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
+
 if __name__ == '__main__':
+	add_title()
 	tcpSer=BackupServer(("",10001),MyRequestHandler)
 	print "waiting for connection"
 	try :
 		tcpSer.serve_forever()
 	except KeyboardInterrupt:
-		tcpSer.finish()
+		print 'over'
