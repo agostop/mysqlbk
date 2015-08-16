@@ -16,6 +16,11 @@ Expire = 60*60*24*30*3 # 3 month
 TMP_PATH='d:\\TMP_E\\TMP\\'
 SQL_BAK='d:\\TMP_E\\sql_bak\\'
 
+def add_title():
+	if os.name == 'nt':
+		import ctypes
+		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
+
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
 		if DEBUG:
@@ -131,6 +136,25 @@ class MyRequestHandler(BRH):
 			elif data == 'MAX_FAILED':
 				return 2
 
+	def banip(self,address):
+		blackfile = 'blacklist.txt'
+		Black_ip_list = []
+		if os.path.exists(blackfile):
+			ip_list = file(blackfile).readlines()
+			for entry in ip_list:
+				Black_ip_list.append(entry.strip())
+		Black_ip_list.append(address)
+		to_ban = ''
+		if len(Black_ip_list) > 1:
+			to_ban = ','.join(Black_ip_list)
+
+		firewall_cmd = 'netsh advfirewall firewall set rule name="ban" dir=in new remoteip=%s action=block' % to_ban
+		os.system(firewall_cmd)
+
+		bfile = file(blackfile,'a')
+		bfile.write('%s\n'%address)	
+		bfile.close()
+
 	def handle(self):
 		addr=self.client_address
 		print "connected from ", addr
@@ -141,6 +165,7 @@ class MyRequestHandler(BRH):
 		try:
 			flist=json.loads(data)
 		except:
+			ban_ip(self.client_address)
 			print 'error data format'
 			return 1
 
@@ -216,10 +241,6 @@ class BackupServer(ThreadingTCPServer):
 			del exc_info, error
 			ThreadingTCPServer.handle_error(self, *args)
 
-def add_title():
-	if os.name == 'nt':
-		import ctypes
-		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
 
 if __name__ == '__main__':
 	add_title()
