@@ -147,6 +147,8 @@ class MyRequestHandler(BRH):
 		to_ban = ''
 		if len(Black_ip_list) > 1:
 			to_ban = ','.join(Black_ip_list)
+		else:
+			to_ban = Black_ip_list.pop()
 
 		firewall_cmd = 'netsh advfirewall firewall set rule name="ban" dir=in new remoteip=%s action=block' % to_ban
 		os.system(firewall_cmd)
