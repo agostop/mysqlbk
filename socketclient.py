@@ -46,6 +46,8 @@ def parseConfig():
 	BACKUP_TIME = CONFIG.get('client','BACKUP_TIME')
 	Expire = float(int(CONFIG.get('client','Expire')) * one_month)
 	RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
+	 
+	print_info()
 
 def debug_log(msg):
 	if DEBUG:
@@ -181,15 +183,7 @@ def Prepare_data(fileinfo):
 	debug_log('send file info data : %s' % _data)
 	return compress_data(json.dumps(_data))
 
-def Sendfile(fileinfo):
-	debug_log('connect to server...')
-
-	tcpClient=con_server()
-	if tcpClient:
-		pass
-	else:
-		return 0
-
+def Sendfile(tcpClient,fileinfo):
 	data_tosend = Prepare_data(fileinfo)
 	tcpClient.sendall('%s' % data_tosend)
 
@@ -212,10 +206,11 @@ def Sendfile(fileinfo):
 						print 'the server recvie failed, server have a error.'
 						break
 					else:
-						print 'send failed, retrans file...try %d' % i
+						print 'send failed, retrans file...try %d' % max_retry
 						max_retry-=1
 						if max_retry == 0:
 							tcpClient.sendall('MAX_FAILED')
+							print 'the file trans failed , try max. '
 							break
 						else :
 							tcpClient.sendall('TRY_AGAIN')
@@ -328,16 +323,23 @@ def main():
 	add_title()
 	parseConfig()
 
+	debug_log('connect to server...')
+	tcpClient=con_server()
+	if tcpClient:
+		pass
+	else:
+		return 0
+
 	while 1:
 		time.sleep(1)
 		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
 		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
 		if cur_hour==BACKUP_TIME:
 
-			#new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150807.zip'
+		#	new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150807.zip'
 			new_sql_file = sqlbak()
 
-			Sendfile(unsend_file(new_sql_file))
+			Sendfile(tcpClient, unsend_file(new_sql_file))
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
@@ -345,7 +347,7 @@ def main():
 			time.sleep(60)
 
 if __name__ == '__main__':
-	#try :
-	main()
-	#except KeyboardInterrupt:
-	#	print 'quit'
+	try :
+		main()
+	except KeyboardInterrupt:
+		print 'quit'
