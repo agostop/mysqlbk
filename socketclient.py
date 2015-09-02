@@ -21,9 +21,10 @@ PORT : %s\n\
 DATABASE_NAME : %s\n\
 BACKPATH : %s\n\
 MYSQLDUMP : %s\n\
+CYCLE_TIME : %s\n\
 BACKUP_TIME : %s\n\
 ---------------------------------------------'\
-% (IDENTITY,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME)
+% (IDENTITY,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,CYCLE_TIME,BACKUP_TIME)
 
 def parseConfig():
 	CONFIG=ConfigParser.ConfigParser()
@@ -33,7 +34,7 @@ def parseConfig():
 	else:
 		os._exit(1)
 
-	global DEBUG,IDENTITY,BUFSIZE,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME,Expire,RECORD_FILE
+	global DEBUG,IDENTITY,BUFSIZE,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME,Expire,RECORD_FILE,TIME_FORMAT,CYCLE_TIME
 	one_month=60*60*24*30
 	DEBUG = int(CONFIG.get('client','DEBUG'))
 	IDENTITY = (CONFIG.get('client','IDENTITY')).decode('utf-8')
@@ -43,9 +44,24 @@ def parseConfig():
 	DATABASE_NAME = CONFIG.get('client','DATABASE_NAME')
 	BACKPATH = CONFIG.get('client','BACKPATH')
 	MYSQLDUMP = CONFIG.get('client','MYSQLDUMP')
-	BACKUP_TIME = CONFIG.get('client','BACKUP_TIME')
 	Expire = float(int(CONFIG.get('client','Expire')) * one_month)
+	CYCLE_TIME = CONFIG.get('client','CYCLE_TIME')
+	TIME_OF_DAY = CONFIG.get('client','TIME_OF_DAY')
+	WEEK = CONFIG.get('client','DAY_OF_WEEK')
+	MONTH = CONFIG.get('client','DAY_OF_MONTH')
 	RECORD_FILE='%s%s' % (BACKPATH,'success_Send.file')
+
+	if CYCLE_TIME.upper() == 'D':
+		TIME_FORMAT = '%H%M'
+		BACKUP_TIME = '%s' % TIME_OF_DAY
+	elif CYCLE_TIME.upper() == 'W':
+		TIME_FORMAT = '%w%H%M'
+		BACKUP_TIME = '%s%s' % (WEEK,TIME_OF_DAY)
+	elif CYCLE_TIME.upper() == 'M':
+		TIME_FORMAT = '%d%H%M'
+		BACKUP_TIME = '%s%s' % (MONTH,TIME_OF_DAY)
+
+	print_info()
 
 def debug_log(msg):
 	if DEBUG:
@@ -212,10 +228,11 @@ def Sendfile(fileinfo):
 						print 'the server recvie failed, server have a error.'
 						break
 					else:
-						print 'send failed, retrans file...try %d' % i
+						print 'send failed, retrans file...try %d' % max_retry
 						max_retry-=1
 						if max_retry == 0:
 							tcpClient.sendall('MAX_FAILED')
+							print 'the file trans failed , try max. '
 							break
 						else :
 							tcpClient.sendall('TRY_AGAIN')
@@ -330,11 +347,11 @@ def main():
 
 	while 1:
 		time.sleep(1)
-		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
+		cur_hour=time.strftime(TIME_FORMAT,time.localtime(time.time()))
 		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
 		if cur_hour==BACKUP_TIME:
 
-			#new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150807.zip'
+#			new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150817.zip'
 			new_sql_file = sqlbak()
 
 			Sendfile(unsend_file(new_sql_file))
@@ -345,7 +362,7 @@ def main():
 			time.sleep(60)
 
 if __name__ == '__main__':
-	#try :
-	main()
-	#except KeyboardInterrupt:
-	#	print 'quit'
+	try :
+		main()
+	except KeyboardInterrupt:
+		print 'quit'
