@@ -86,8 +86,9 @@ def rm_Expired_file():
 	Expire_day = float(cur_time) - float(Expire)
 	debug_log('Expire time is %f' % Expire_day)
 	to_remove=[]
-	
-	record_file = RECORD_FILE.split('\\')[-1]
+
+	record_file = os.path.basename(RECORD_FILE)
+
 	debug_log('record_file is %s' % record_file)
 
 	for dir_path,subpaths,files in os.walk(BACKPATH):
@@ -259,7 +260,7 @@ def sqlbak():
 	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
 
 	if not os.path.isfile(MYSQLDUMP):
-		print 'the mysqlbak.exe is not in d:\\wlmp\\mysql\\bin'
+		print 'the mysqlbak.exe is not in %s' % MYSQLDUMP
 		return 0
 
 	sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
@@ -320,7 +321,8 @@ def unsend_file(new_sql_file):
 	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
-			if f == RECORD_FILE.split('\\')[-1] : continue
+#			if f == RECORD_FILE.split('\\')[-1] : continue
+			if f == os.path.basename(RECORD_FILE) : continue
 			if f not in f_list:
 				f_path=os.path.join(dir_path,f)
 				ned2send_file_path.append(f_path)
@@ -361,8 +363,49 @@ def main():
 			print '=============process over=============='
 			time.sleep(60)
 
+def daemonize():
+	stdin = '/dev/null'
+	stderr = '/dev/null'
+	stdout = '/dev/null'
+	try: 
+		pid = os.fork() 
+		if pid > 0:
+			# exit first parent
+	      		sys.exit(0) 
+	except OSError, e: 
+		sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
+		sys.exit(1)
+	
+	# decouple from parent environment
+	os.chdir("/") 
+	os.setsid() 
+	os.umask(0) 
+	
+	# do second fork
+	try: 
+		pid = os.fork() 
+		if pid > 0:
+			# exit from second parent
+			sys.exit(0) 
+	except OSError, e: 
+		sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
+		sys.exit(1) 
+	
+	# redirect standard file descriptors
+	sys.stdout.flush()
+	sys.stderr.flush()
+	si = file(stdin, 'r')
+	so = file(stdout, 'a+')
+	se = file(stderr, 'a+', 0)
+	os.dup2(si.fileno(), sys.stdin.fileno())
+	os.dup2(so.fileno(), sys.stdout.fileno())
+	os.dup2(se.fileno(), sys.stderr.fileno())
+
 if __name__ == '__main__':
 	try :
+		if os.name != 'nt':
+			daemonize()
+
 		main()
 	except KeyboardInterrupt:
 		print 'quit'
