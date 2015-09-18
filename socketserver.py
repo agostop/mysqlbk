@@ -9,12 +9,15 @@ import errno
 import binascii
 import time
 import zlib
+from multiprocessing import Process
+from controlDB import DB
 
 DEBUG=1
 BUFSIZE=1024
 Expire = 60*60*24*30*3 # 3 month
 TMP_PATH='d:\\TMP_E\\TMP\\'
 SQL_BAK='d:\\TMP_E\\sql_bak\\'
+db = DB()
 
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
@@ -131,21 +134,23 @@ class MyRequestHandler(BRH):
 			elif data == 'MAX_FAILED':
 				return 2
 
-	def sql_backup(self,flist):
+	def File_accept(self,flist):
 		addr=self.client_address
-		identity=flist.pop(0)
+		self.debug_log('%s'%flist)
+		identity = flist[0]
+		flist = flist.pop()
 
-		for fileinfo in flist:
-			self.debug_log('to move file')
-			filename='%s_%s' % (addr[0],fileinfo['filename'])
-			file_size=fileinfo['filesize']
+		for filekey in flist.keys():
+
+			(file_size,file_crc32) = flist[filekey]
 			file_size=int(file_size)
-			file_crc32=fileinfo['filecrc32']
+			filename='%s_%s' % (addr[0],filekey)
+
 			tmp_path=TMP_PATH
 			fin_path='%s%s' % (SQL_BAK,addr[0])
 			tmp_file='%s%s' % (tmp_path,filename)
 
-			self.debug_log('fileinfo is :\n\
+			self.debug_log('filekey is :\n\
 					filename %s\n\
 					filesize %d\n\
 					filecrc32 %s'\
@@ -191,40 +196,59 @@ set rule name="ban" dir=in new remoteip=%s action=block' % to_ban
 		bfile.write('%s\n'%address)	
 		bfile.close()
 
-	def keepalive(self):
-		while True:
-			data = self.request.recv(BUFSIZE)
-			if data == 'live':
-				print data
-				self.request.send('ok')
-				continue
-			elif data == 'backup':
-				print data
-				self.request.send('come on, backup')
-				return 1
-			else:
-				return 0
+	def keepalive(self,data):
+		try:
+			client = self.client_address
+			ipaddr = client[0]
+			identity = data[0]
+			db.addserv(ipaddr,identity)
+			data = data.pop()
+			serv_live = 0
+			while True:
+				if data == 'live':
+					self.request.send('ok')
+					data = self.request.recv(BUFSIZE)
+					if not serv_live:
+						serv_live = 1
+						db.changestatus(ipaddr,serv_live)
+					continue
+				else:
+					break
+
+			if serv_live:
+				serv_live = 0
+				db.changestatus(ipaddr,serv_live)
+		except:
+			if serv_live:
+				serv_live = 0
+				db.changestatus(ipaddr,serv_live)
 
 	def handle(self):
 		print "connected from ", self.client_address
-		data=self.request.recv(BUFSIZE)
-
 		try:
-			data=self.decompress_data(data)
-			flist=json.loads(data)
+			data = self.request.recv(BUFSIZE)
+			data = self.decompress_data(data)
+
+			data_info = json.loads(data)
+			self.debug_log('%s'%data_info)
 		except:
-			self.banip(self.client_address[0])
+			#self.banip(self.client_address[0])
 			print 'error data format'
 			return 1
 
-		self.sql_backup(flist)
+		msg_type = data_info.pop(0)
+		if msg_type == 'keepalive':
+			self.keepalive(data_info)
+		elif msg_type == 'file':
+			self.File_accept(data_info)
 
 	def setup(self):
-		self.debug_log('into thread')
 		self.request.settimeout(60)
+		self.debug_log('into thread %s'% time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
+
 	def finish(self):
 		self.request.close()
-		self.debug_log("exit the thread")
+		self.debug_log("===========exit the thread===========")
 
 class BackupServer(ThreadingTCPServer):
 	"""Backup Server"""
@@ -260,11 +284,66 @@ def add_title():
 		import ctypes
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
 
-if __name__ == '__main__':
-	add_title()
-	tcpSer=BackupServer(("",10001),MyRequestHandler)
-	print "waiting for connection"
+def check_status():
 	try :
+		badstat = 0
+		ned_report_list = []
+
+		while True:
+			client_list = db.all_client()
+			for client in client_list:
+				if not db.qrystat(client):
+					badstat = db.qry_thrd(client)
+					badstat += 1
+					db.update_thrd(client,badstat)
+				else:
+					if db.qry_thrd(client) :
+						db.update_thrd(client,0)
+
+				if db.nedtoreport(client):
+					#report the msg
+					print 'the server is down'
+					#for i in ned_report_list :
+					#db.update_thrd(client,0)
+				else:
+					pass
+
+			time.sleep(10)
+	except KeyboardInterrupt:
+		pass
+
+def Backup_thread():
+	try :
+		tcpSer=BackupServer(("",10001),MyRequestHandler)
+		print "waiting for connection"
 		tcpSer.serve_forever()
+	except KeyboardInterrupt:
+		pass
+
+def warn_proc():
+	w_proc = Process(target=check_status, name='check_status',args=())
+	w_proc.Daemon = True
+	w_proc.start()
+	return w_proc
+
+def main_proc():
+	m_proc = Process(target=Backup_thread, name='Backup_thread',args=())
+	m_proc.Daemon = True
+	m_proc.start()
+	return m_proc
+
+if __name__ == '__main__':
+	try :
+		add_title()
+		w_proc = warn_proc()
+		m_proc = main_proc()
+		while True:
+			time.sleep(1)
+			if not w_proc.is_alive():
+				w_proc = warn_proc()
+			elif not m_proc.is_alive():
+				m_proc = main_proc()
+			else:
+				pass
 	except KeyboardInterrupt:
 		print 'quit'

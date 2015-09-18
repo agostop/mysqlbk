@@ -10,6 +10,8 @@ import zipfile
 import binascii
 import struct
 import ConfigParser
+import copy
+import threading
 
 def print_info():
 	print '\
@@ -154,50 +156,65 @@ def con_server():
 			tcpClient.close()
 		return 0
 
-	print 'try to connect server %s' % (BAKSERV_IP)
 	max_retry = 5
 	for i in xrange(max_retry):
 		try:
+			print 'try to connect server %s' % (BAKSERV_IP)
 			tcpClient.connect((BAKSERV_IP,PORT))
-			return tcpClient
+			if tcpClient:
+				return tcpClient
+				break
 		except:
+			print 'can\'t connect to server, wait 30 second retry ...'
 			time.sleep(30)
 
 	return 0
 
-def Prepare_data(fileinfo):
+def Prepare_data(msg,msg_type):
 	identity = IDENTITY.encode('utf-8')
 
 	_data = []
-	for fdict in fileinfo:
-		_tmp = {}
-		_tmp = {
-						'filename':fdict['filename'] ,
-						'filesize':fdict['filesize'] ,
-						'filecrc32':fdict['filecrc32'],
-						}
-		_data.append(_tmp)
+	print "the msg is :" ,msg
+	if msg_type == 'file':
+		for _info in msg.keys():
+			msg[_info].pop()		#pop lastest value of filepath
 
-	_data.insert(0,identity)
+	elif msg_type == 'keepalive':
+		pass
 
+	_data.append(msg)
+
+	_data.insert(0,msg_type)
+	_data.insert(1,identity)
 	debug_log('send file info data : %s' % _data)
+
 	return compress_data(json.dumps(_data))
 
-def Sendfile(tcpClient,fileinfo):
-	data_tosend = Prepare_data(fileinfo)
-	tcpClient.sendall('%s' % data_tosend)
+def Sendfile(tcpClient,filelist):
+	fileinfo = get_fileinfo(filelist)
+	if not fileinfo:
+		return 0
+
+	data_to_send = Prepare_data(copy.deepcopy(fileinfo),'file')
 
 	try:
-		for fdict in fileinfo:
-			filepath = fdict['filepath']
-			debug_log('%s'%filepath)
+		if data_to_send:
+			tcpClient.sendall('%s' % data_to_send)
+	except Exception,ex:
+		print Exception,":",ex
+		return 0
+
+	try:
+		for fname in fileinfo.keys():
+			(filesize,filecrc32,filepath) = fileinfo[fname]
+			debug_log('filepath is %s\nfilesize is %s\nfilecrc32 is %s'%(filepath,filesize,filecrc32))
+
 			max_retry=5
-			#for i in xrange(max_retry):
 			while True:
 				ready = tcpClient.recv(BUFSIZE).strip()
 				debug_log('rc is |%s|' % ready)
 				if ready == 'COME_ON':
-					rt=sendfiledata(filepath,fdict['filesize'],tcpClient)
+					rt=sendfiledata(filepath,filesize,tcpClient)
 					if rt == 1:
 						print 'send finished'
 						record_success_file(filepath)		
@@ -264,26 +281,36 @@ def sqlbak():
 		return 0
 
 def get_fileinfo(allfile):
-	fileinfo=[]
-	for fpath in allfile:
-		_info={}
-		debug_log('the get_fileinfo fun , fpath is %s'%fpath)
-		fname = os.path.basename(fpath)
-		fsize = os.stat(fpath).st_size
-		crc32val = file_crc32(fpath)
-		_info['filename'] = fname
-		_info['filepath'] = fpath
-		_info['filesize'] = fsize
-		_info['filecrc32'] = crc32val
-		fileinfo.append(_info)
+	try:
+		#fileinfo=[]
+		_data={}
+		
+		#fileinfo.append('file')
 
-	return fileinfo
+		for fpath in allfile:
+			_tmpstat=[]
+			debug_log('the get_fileinfo fun , fpath is %s'%fpath)
+			fname = os.path.basename(fpath)
+			_tmpstat.append(os.stat(fpath).st_size)
+			_tmpstat.append(file_crc32(fpath))
+			_tmpstat.append(fpath)
+			
+			_data[fname] = _tmpstat
+
+		#fileinfo.append(_data)
+
+		#return fileinfo
+		return _data
+
+	except Exception,ex:
+		print Exception,":",ex
+		return 0
 
 def unsend_file(new_sql_file):
 	f_list=[]
 	if not os.path.exists(RECORD_FILE):
 		f_list.append(new_sql_file)
-		return get_fileinfo(f_list)
+		return f_list
 	
 	rfile=open(RECORD_FILE,'r')
 	while 1:
@@ -308,43 +335,73 @@ def unsend_file(new_sql_file):
 		if new_sql_file not in ned2send_file_path:
 			ned2send_file_path.append(new_sql_file)
 
-	if ned2send_file_path:
-		ned2send_file_path = get_fileinfo(ned2send_file_path)
-		debug_log('%s'%ned2send_file_path)
+	debug_log('%s'%ned2send_file_path)
 	
 	return ned2send_file_path
 
-def add_title():
-	if os.name == 'nt':
-		import ctypes
-		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
-
-def main():
-	add_title()
-	parseConfig()
-
-	debug_log('connect to server...')
+def backup():
 	tcpClient=con_server()
 	if tcpClient:
 		pass
 	else:
 		return 0
 
-	while 1:
+	new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150817.zip'
+#	new_sql_file = sqlbak()
+
+	Sendfile(tcpClient, unsend_file(new_sql_file))
+
+	print 'now start to remove Expired file'
+	rm_Expired_file()
+	print '=============process over=============='
+	time.sleep(60)
+
+def add_title():
+	if os.name == 'nt':
+		import ctypes
+		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
+
+def keepalive():
+	tcpClient=con_server()
+	if tcpClient:
+		pass
+	else:
+		return 0
+
+	try:
+		tcpClient.sendall(Prepare_data('live','keepalive'))
+
+		while True:
+			data = tcpClient.recv(5)
+			if data == 'ok':
+				print data
+				tcpClient.sendall('live')
+				time.sleep(2)
+				continue
+		else:
+			return 0
+
+	except Exception,ex:
+		print Exception,":",ex
+		return 0
+
+def main():
+	add_title()
+	parseConfig()
+
+	debug_log('connect to server...')
+
+	while True:
 		time.sleep(1)
-		cur_hour=time.strftime('%H%M',time.localtime(time.time()))
+		if threading.activeCount() == 1 :
+			t = threading.Thread(target=keepalive, name='keepalive',args=())
+			t.setDaemon(True)
+			t.start()
+
+		cur_hour = time.strftime('%H%M',time.localtime(time.time()))
 		#cur_hour=time.strftime('%H%M',time.localtime(1438534806))
-		if cur_hour==BACKUP_TIME:
-
-		#	new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150807.zip'
-			new_sql_file = sqlbak()
-
-			Sendfile(tcpClient, unsend_file(new_sql_file))
-
-			print 'now start to remove Expired file'
-			rm_Expired_file()
-			print '=============process over=============='
-			time.sleep(60)
+		if cur_hour == BACKUP_TIME:
+			backup()
 
 if __name__ == '__main__':
 	try :
