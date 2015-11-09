@@ -100,9 +100,34 @@ def rm_Expired_file():
 			if _mtime < Expire_day:
 				debug_log('expired is :%s' % f )
 				to_remove.append(os.path.join(dir_path,f))
-	
-	for f in to_remove:
-		os.remove(f)
+
+	if to_remove :
+		exp_filename = []
+		not_exp_file = []
+
+		for f in to_remove:
+			os.remove(f)
+			exp_filename.append(os.path.basename(f))
+
+		debug_log("exp_filename : %s " % str(exp_filename))
+
+		rc_filename = []
+		rc_file = open(RECORD_FILE,"r")
+		for file_name in rc_file:
+			rc_filename.append(file_name.strip())
+		rc_file.close()
+
+		debug_log("rc_filename : %s " % str(rc_filename))
+
+		not_exp_file = list(set(rc_filename) - set(exp_filename))
+		debug_log("not_exp_file : %s " % str(not_exp_file))
+
+		update_rcfile = open(RECORD_FILE,"w")
+		update_rcfile.truncate()
+		for _file in not_exp_file:
+			update_rcfile.write('%s\n' % _file)
+
+		update_rcfile.close()
 
 def compress_data(data_str):
 	return zlib.compress(data_str,zlib.Z_BEST_COMPRESSION)
@@ -251,40 +276,49 @@ def Sendfile(fileinfo):
 			tcpClient.close()
 
 def sqlbak():
+	file_name_array = []
 	TIMESTR= time.strftime('%Y%m%d',time.localtime(time.time()))
 	if not os.path.exists(BACKPATH):
 		os.mkdir(BACKPATH)
 
-	backfile = '%s%s.sql' % (BACKPATH,TIMESTR)
-	zip_file_name = '%s%s_%s.zip' % (BACKPATH,DATABASE_NAME,TIMESTR)
-	debug_log('at %s backup the %s ...' % (TIMESTR,DATABASE_NAME))
-
-	if not os.path.isfile(MYSQLDUMP):
-		print 'the mysqlbak.exe is not in %s' % MYSQLDUMP
-		return 0
-
-	sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,DATABASE_NAME,backfile)
-
-	os.system(sql_comm) # can't return correct value
+	for dname in DATABASE_NAME.split(','):
+		backfile = '%s%s.sql' % (BACKPATH,TIMESTR)
+		zip_file_name = '%s%s_%s.zip' % (BACKPATH,dname,TIMESTR)
+		debug_log('at %s backup the %s ...' % (TIMESTR,dname))
 	
-	if os.path.exists(backfile):
-		d=open(backfile)
-		data=d.read()
-		l=len(data)
-		d.close()
+		if not os.path.isfile(MYSQLDUMP):
+			print 'the mysqlbak.exe is not in %s' % MYSQLDUMP
+			return file_name_array
+	
+		sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,dname,backfile)
+	
+		try:
+			os.system(sql_comm) # can't return correct value
+		except Exception,ex:
+			print Exception,":",ex
+			return file_name_array
 
-		if l == 0:
-			print 'ERROR: %s is backup Failed, sql_comm is exec failed.' % DATABASE_NAME
-			return 0
+		if os.path.exists(backfile):
+			d=open(backfile)
+			data=d.read()
+			l=len(data)
+			d.close()
+
+			if l == 0:
+				print 'ERROR: %s is backup Failed, sql_comm is exec failed.' % dname
+				return file_name_array
+			else:
+				f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
+				f.write(backfile)
+				os.remove(backfile)
+				f.close()
+				file_name_array.append(zip_file_name)
+
 		else:
-			f = zipfile.ZipFile(zip_file_name,'w',zipfile.ZIP_DEFLATED)
-			f.write(backfile)
-			os.remove(backfile)
-			return zip_file_name
+			debug_log('ERROR: cannot find the sql back file.')
+			return file_name_array
 
-	else:
-		debug_log('ERROR: cannot find the sql back file.')
-		return 0
+	return file_name_array
 
 def get_fileinfo(allfile):
 	fileinfo=[]
@@ -305,9 +339,10 @@ def get_fileinfo(allfile):
 def unsend_file(new_sql_file):
 	f_list=[]
 	if not os.path.exists(RECORD_FILE):
-		f_list.append(new_sql_file)
+		#f_list.append(new_sql_file)
+		f_list+=new_sql_file
 		return get_fileinfo(f_list)
-	
+
 	rfile=open(RECORD_FILE,'r')
 	while 1:
 		line = rfile.readline().strip()
@@ -317,7 +352,7 @@ def unsend_file(new_sql_file):
 	if not f_list:
 		return f_list
 
-	debug_log('%s' % new_sql_file)
+	debug_log(' new_sql_file : %s' % new_sql_file)
 	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
@@ -327,15 +362,14 @@ def unsend_file(new_sql_file):
 				f_path=os.path.join(dir_path,f)
 				ned2send_file_path.append(f_path)
 
-	debug_log('%s'%ned2send_file_path)
-	if new_sql_file :
-		if new_sql_file not in ned2send_file_path:
-			ned2send_file_path.append(new_sql_file)
+	debug_log('1 ned2send_file_path : %s'%ned2send_file_path)
+
+	ned2send_file_path = list(set(ned2send_file_path+new_sql_file)) #去重合并
 
 	if ned2send_file_path:
 		ned2send_file_path = get_fileinfo(ned2send_file_path)
-		debug_log('%s'%ned2send_file_path)
-	
+		debug_log('2 ned2send_file_path : %s'%ned2send_file_path)
+
 	return ned2send_file_path
 
 def add_title():
@@ -355,6 +389,8 @@ def main():
 
 #			new_sql_file = 'D:\\WLMP\\back_database\\skynew_20150817.zip'
 			new_sql_file = sqlbak()
+			if len(new_sql_file) == 0:
+				print 'the sqlbak command is exec failed !'
 
 			Sendfile(unsend_file(new_sql_file))
 

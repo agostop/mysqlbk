@@ -74,7 +74,7 @@ class MyRequestHandler(BRH):
 		tmp_path='%s%s' % (tmp,fname)
 		fin_path='%s\\%s' % (finish_dir,fname)
 		self.debug_log('the dir info is :%s\n%s\n%s'%(finish_dir,tmp_path,fin_path))
-		
+
 		if not os.path.exists(finish_dir) or not os.path.isdir(finish_dir):
 			os.mkdir(finish_dir)
 		elif os.path.exists(fin_path):
@@ -162,7 +162,7 @@ class MyRequestHandler(BRH):
 		print "connected from ", addr
 		data=self.request.recv(BUFSIZE)
 		data=self.decompress_data(data)
-		print data
+		#print data
 
 		try:
 			flist=json.loads(data)
