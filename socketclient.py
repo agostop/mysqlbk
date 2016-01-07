@@ -32,6 +32,7 @@ def parseConfig():
 	if os.path.exists(CONFIG_FILE_NAME):
 		CONFIG.read(CONFIG_FILE_NAME)
 	else:
+		print "can not found the config file"
 		os._exit(1)
 
 	global DEBUG,IDENTITY,BUFSIZE,BAKSERV_IP,PORT,DATABASE_NAME,BACKPATH,MYSQLDUMP,BACKUP_TIME,Expire,RECORD_FILE,TIME_FORMAT,CYCLE_TIME
@@ -208,15 +209,13 @@ def con_server():
 def Prepare_data(fileinfo):
 	identity = IDENTITY.encode('utf-8')
 
-	_data = []
-	for fdict in fileinfo:
-		_tmp = {}
-		_tmp = {
-						'filename':fdict['filename'] ,
-						'filesize':fdict['filesize'] ,
-						'filecrc32':fdict['filecrc32'],
-						}
-		_data.append(_tmp)
+	_data = [
+			{
+			'filename':fdict['filename'],
+			'filesize':fdict['filesize'], 
+			'filecrc32':fdict['filecrc32']
+			}	for fdict in fileinfo
+	]
 
 	_data.insert(0,identity)
 
@@ -290,12 +289,13 @@ def sqlbak():
 			print 'the mysqlbak.exe is not in %s' % MYSQLDUMP
 			return file_name_array
 	
-		sql_comm = '%s --default-character-set=utf8 -hlocalhost -R --triggers -B %s > %s' % (MYSQLDUMP,dname,backfile)
+		sql_comm = '%s --default-character-set=utf8 -hlocalhost --single-transaction -R --triggers -B %s > %s' % (MYSQLDUMP,dname,backfile)
 	
 		try:
 			os.system(sql_comm) # can't return correct value
 		except Exception,ex:
 			print Exception,":",ex
+			os.exit(1)
 			return file_name_array
 
 		if os.path.exists(backfile):
@@ -321,25 +321,22 @@ def sqlbak():
 	return file_name_array
 
 def get_fileinfo(allfile):
-	fileinfo=[]
-	for fpath in allfile:
-		_info={}
-		debug_log('the get_fileinfo fun , fpath is %s'%fpath)
-		fname = os.path.basename(fpath)
-		fsize = os.stat(fpath).st_size
-		crc32val = file_crc32(fpath)
-		_info['filename'] = fname
-		_info['filepath'] = fpath
-		_info['filesize'] = fsize
-		_info['filecrc32'] = crc32val
-		fileinfo.append(_info)
+	fileinfo=	[ 
+			{ 
+				'filename' : os.path.basename(fpath) ,
+				'filepath' : fpath,
+				'filesize' : os.stat(fpath).st_size,
+				'filecrc32' : file_crc32(fpath) 
+			} for fpath in allfile 
+	]
+
+	debug_log('the get_fileinfo fun , fileinfo is %s'% fileinfo )
 
 	return fileinfo
 
-def unsend_file(new_sql_file):
+def to_send_file(new_sql_file):
 	f_list=[]
 	if not os.path.exists(RECORD_FILE):
-		#f_list.append(new_sql_file)
 		f_list+=new_sql_file
 		return get_fileinfo(f_list)
 
@@ -356,7 +353,6 @@ def unsend_file(new_sql_file):
 	ned2send_file_path = []
 	for dir_path,subpaths,files in os.walk(BACKPATH):
 		for f in files:
-#			if f == RECORD_FILE.split('\\')[-1] : continue
 			if f == os.path.basename(RECORD_FILE) : continue
 			if f not in f_list:
 				f_path=os.path.join(dir_path,f)
@@ -378,7 +374,6 @@ def add_title():
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Process running...')
 
 def main():
-	add_title()
 	parseConfig()
 
 	while 1:
@@ -392,7 +387,7 @@ def main():
 			if len(new_sql_file) == 0:
 				print 'the sqlbak command is exec failed !'
 
-			Sendfile(unsend_file(new_sql_file))
+			Sendfile(to_send_file(new_sql_file))
 
 			print 'now start to remove Expired file'
 			rm_Expired_file()
@@ -413,7 +408,7 @@ def daemonize():
 		sys.exit(1)
 	
 	# decouple from parent environment
-	os.chdir("/") 
+	os.chdir(os.path.split(os.path.realpath(__file__))[0]) 
 	os.setsid() 
 	os.umask(0) 
 	
@@ -441,6 +436,8 @@ if __name__ == '__main__':
 	try :
 		if os.name != 'nt':
 			daemonize()
+		else:
+			add_title()
 
 		main()
 	except KeyboardInterrupt:
