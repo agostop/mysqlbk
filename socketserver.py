@@ -18,6 +18,7 @@ Expire = 60*60*24*30*3 # 3 month
 TMP_PATH='d:\\TMP_E\\TMP\\'
 SQL_BAK='d:\\TMP_E\\sql_bak\\'
 db = DB()
+allclient = db.all_client()
 
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
@@ -134,7 +135,7 @@ class MyRequestHandler(BRH):
 			elif data == 'MAX_FAILED':
 				return 2
 
-	def File_accept(self,flist):
+	def File_accept(self,flist,update=0):
 		addr=self.client_address
 		self.debug_log('%s'%flist)
 		identity = flist[0]
@@ -161,14 +162,16 @@ class MyRequestHandler(BRH):
 					rt = self.recv_File(tmp_file,file_size,file_crc32)
 					if rt == 1:
 						print 'Recv OK'
+						if update:
+							break
 						self.movefile(tmp_path,fin_path,filename,identity)
 						self.rm_Expired_file(fin_path)
 						break
 					elif rt == 2:
 						print 'Recv failed, and max retry.'
 						break
-					else:
-						pass
+					elif rt == 0:  #retry again
+						continue
 
 			except :
 				if os.path.exists(tmp_file):
@@ -197,31 +200,25 @@ set rule name="ban" dir=in new remoteip=%s action=block' % to_ban
 		bfile.close()
 
 	def keepalive(self,data):
-		try:
-			client = self.client_address
-			ipaddr = client[0]
-			identity = data[0]
+		client = self.client_address
+		ipaddr = client[0]
+		identity = data[0]
+		if ipaddr not in allclient :
 			db.addserv(ipaddr,identity)
-			data = data.pop()
-			serv_live = 0
-			while True:
+
+		self.debug_log('the data is %s'%(data))
+
+		data = data.pop()
+		while True:
+			try:
 				if data == 'live':
 					self.request.send('ok')
 					data = self.request.recv(BUFSIZE)
-					if not serv_live:
-						serv_live = 1
-						db.changestatus(ipaddr,serv_live)
 					continue
 				else:
 					break
-
-			if serv_live:
-				serv_live = 0
-				db.changestatus(ipaddr,serv_live)
-		except:
-			if serv_live:
-				serv_live = 0
-				db.changestatus(ipaddr,serv_live)
+			except:
+				db.changestatus(ipaddr,status=0)
 
 	def handle(self):
 		print "connected from ", self.client_address
@@ -236,19 +233,21 @@ set rule name="ban" dir=in new remoteip=%s action=block' % to_ban
 			print 'error data format'
 			return 1
 
-		msg_type = data_info.pop(0)
+		msg_type = data_info.pop(0) #data_info[0]
 		if msg_type == 'keepalive':
 			self.keepalive(data_info)
 		elif msg_type == 'file':
 			self.File_accept(data_info)
+		elif msg_type == 'update':
+			self.File_accept(data_info,update=1)
 
 	def setup(self):
 		self.request.settimeout(60)
 		self.debug_log('into thread %s'% time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(time.time())))
 
 	def finish(self):
-		self.request.close()
 		self.debug_log("===========exit the thread===========")
+		self.request.close()
 
 class BackupServer(ThreadingTCPServer):
 	"""Backup Server"""
@@ -283,67 +282,14 @@ def add_title():
 	if os.name == 'nt':
 		import ctypes
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
-
-def check_status():
-	try :
-		badstat = 0
-		ned_report_list = []
-
-		while True:
-			client_list = db.all_client()
-			for client in client_list:
-				if not db.qrystat(client):
-					badstat = db.qry_thrd(client)
-					badstat += 1
-					db.update_thrd(client,badstat)
-				else:
-					if db.qry_thrd(client) :
-						db.update_thrd(client,0)
-
-				if db.nedtoreport(client):
-					#report the msg
-					print 'the server is down'
-					#for i in ned_report_list :
-					#db.update_thrd(client,0)
-				else:
-					pass
-
-			time.sleep(10)
-	except KeyboardInterrupt:
+	else:
 		pass
-
-def Backup_thread():
-	try :
-		tcpSer=BackupServer(("",10001),MyRequestHandler)
-		print "waiting for connection"
-		tcpSer.serve_forever()
-	except KeyboardInterrupt:
-		pass
-
-def warn_proc():
-	w_proc = Process(target=check_status, name='check_status',args=())
-	w_proc.Daemon = True
-	w_proc.start()
-	return w_proc
-
-def main_proc():
-	m_proc = Process(target=Backup_thread, name='Backup_thread',args=())
-	m_proc.Daemon = True
-	m_proc.start()
-	return m_proc
 
 if __name__ == '__main__':
+	add_title()
+	tcpSer=BackupServer(("",10001),MyRequestHandler)
+	print "waiting for connection"
 	try :
-		add_title()
-		w_proc = warn_proc()
-		m_proc = main_proc()
-		while True:
-			time.sleep(1)
-			if not w_proc.is_alive():
-				w_proc = warn_proc()
-			elif not m_proc.is_alive():
-				m_proc = main_proc()
-			else:
-				pass
+		tcpSer.serve_forever()
 	except KeyboardInterrupt:
 		print 'quit'
