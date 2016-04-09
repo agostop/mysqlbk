@@ -16,11 +16,23 @@ Expire = 60*60*24*30*3 # 3 month
 TMP_PATH='d:\\TMP_E\\TMP\\'
 SQL_BAK='d:\\TMP_E\\sql_bak\\'
 
+"""
+@api {function} 添加窗口标题
+@apiGroup Main
+@apiName add_title
+@apiParam None
+"""
 def add_title():
 	if os.name == 'nt':
 		import ctypes
 		ctypes.windll.kernel32.SetConsoleTitleW(u'Backup Server running...')
 
+"""
+@api {class} SocketServer主函数类
+@apiName MyRequestHandle
+@apiGroup MyRequestHandler
+@apiParam {class} BRH BaseRequestHandler基础请求句柄
+"""
 class MyRequestHandler(BRH):
 	def debug_log(self,msg):
 		if DEBUG:
@@ -28,6 +40,20 @@ class MyRequestHandler(BRH):
 		else:
 			pass
 	
+"""
+@api {function} 对数据进行压缩
+@apiDescription 使用zlib压缩将要发送的数据
+@apiName decompress_data
+@apiGroup MyRequestHandler
+@apiParam {string} data_str 准备发送到客户端的数据
+@apiSuccessExample Success-Return:
+返回string类型，压缩后的数据
+data
+
+@apiErrorExample Error-Return:
+返回string类型，错误信息
+'error data'
+"""
 	def decompress_data(self,data_str):
 		try:
 			data=zlib.decompress(data_str)
@@ -35,6 +61,14 @@ class MyRequestHandler(BRH):
 		except:
 			return 'error data'
 
+"""
+@api {function} 删除过期文件
+@apiDescription 每三个月进行一次遍历，根据当前时间进行对比，超过时间的文件会被删除
+@apiName rm_Expired_file
+@apiGroup MyRequestHandler
+@apiParam {string} FILEPATH 接收文件的文件夹路径
+
+"""
 	def rm_Expired_file(self,FILEPATH):
 		cur_time = time.time()
 		Expire_day = float(cur_time) - Expire
@@ -52,6 +86,22 @@ class MyRequestHandler(BRH):
 		for f in to_remove:
 			os.remove(f)
 
+"""
+@api {function} 校验数据完整性
+@apiDescription 校验文件的完整性，返回一个8位的校验值，recv_file函数会和客户端发送来的校验值进行对比
+@apiName to_crc32
+@apiGroup MyRequestHandler
+@apiParam {string} filename 需要校验的文件名，具体到路径
+@apiSuccessExample Success-Return:
+返回string类型
+8位校验值
+d23nd92n
+
+@apiErrorExample Error-Return:
+返回int类型，并输出错误信息
+return: 0
+output:"compute file crc failed!"
+"""
 	def to_crc32(self,filename):
 		try:
 			blocksize = 1024 * 64
@@ -69,6 +119,18 @@ class MyRequestHandler(BRH):
 
 		return '%08x' % crc
 
+"""
+@api {function} 将临时目录中的文件移动到相应文件夹
+@apiDescription 主要是根据该文件的身份信息，将该文件重新命名，并放入相应身份信息命名的文件夹
+@apiName movefile
+@apiGroup MyRequestHandler
+@apiParam {string} tmp 临时目录路径
+@apiParam {string} fin 相应归档的目录路径
+@apiParam {string} fname 归档的文件名
+@apiParam {string} ident 该文件的身份信息
+@apiSuccessExample Success-Return:
+无返回值
+"""
 	def movefile(self,tmp,fin,fname,ident):
 		finish_dir='%s_%s'%(fin,ident)
 		tmp_path='%s%s' % (tmp,fname)
@@ -81,6 +143,24 @@ class MyRequestHandler(BRH):
 			os.remove(fin_path)
 		os.rename(tmp_path,fin_path)
 
+"""
+@api {function} 接收文件
+@apiDescription 将客户端发送的文件接受到一个临时文件中，完成后返回给归档函数进行归档，接收时，如果出错会返回0，返回0时会通知客户端重试，重试5次以后会返回2，表示已达到最大重试次数，结束本次回话
+@apiName recv_File
+@apiGroup MyRequestHandler
+@apiParam {string} tmp_file 接收时的临时文件名
+@apiParam {string} file_size 接收到的通告中的文件大小信息
+@apiParam {string} file_crc32 接收到的通告中的文件crc32校验值
+@apiSuccessExample Success-Return:
+返回int类型
+return: 1
+
+@apiErrorExample Error-Return:
+返回int类型，并输出错误信息
+return: 0或者2
+0代表接收时出现问题，返回0后会通知客户端重试
+2代表重试次数已经超过最大值
+"""
 	def recv_File(self, tmp_file, file_size, file_crc32):
 		try:
 			myfile=open(tmp_file , 'wb')
@@ -136,6 +216,15 @@ class MyRequestHandler(BRH):
 			elif data == 'MAX_FAILED':
 				return 2
 
+"""
+@api {function} 防扫描策略
+@apiDescription 用来ban掉一些恶意扫描的ip，对客户端发送来的第一个包进行解析，如果解析失败，则加入防火墙的deny策略中
+@apiName banip
+@apiGroup MyRequestHandler
+@apiParam {string} address 需要拒绝的IP地址
+@apiSuccessExample Success-Return:
+无返回值
+"""
 	def banip(self,address):
 		blackfile = 'blacklist.txt'
 		Black_ip_list = []
@@ -157,6 +246,15 @@ class MyRequestHandler(BRH):
 		bfile.write('%s\n'%address)	
 		bfile.close()
 
+"""
+@api {function} 主句柄执行函数
+@apiDescription 用来和客户端建立连接，判断消息类型，根据不同消息调用其他函数
+@apiName handle
+@apiGroup MyRequestHandler
+@apiParam {none} none 无参数
+@apiSuccessExample Success-Return:
+无返回值
+"""
 	def handle(self):
 		addr=self.client_address
 		print "connected from ", addr
@@ -214,6 +312,15 @@ class MyRequestHandler(BRH):
 		self.request.close()
 		self.debug_log("exit the thread")
 
+"""
+@api {function} 封装多线程服务类
+@apiGroup BackupServer
+@apiName BackupServer
+@apiDescription 主要是确保了安全性，处理了一些错误，摘自goagent
+@apiParam {none} none 无参数
+@apiSuccessExample Success-Return:
+无返回值
+"""
 class BackupServer(ThreadingTCPServer):
 	"""Backup Server"""
 	request_queue_size = 1024
